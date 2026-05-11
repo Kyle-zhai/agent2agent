@@ -46,10 +46,104 @@ links: [[INDEX]], [[FEATURES]], [[ARCHITECTURE]], [[SECURITY]]
 - [ ] 注册时 HIBP 密码泄露检查
 - [ ] **Per-user LLM API key**（让托管 agent 用用户自己的额度）
 - [ ] Per-conversation persona override **UI**（后端已在 v0.4.2，UI 已在 v0.4.4，但可以更精致）
-- [ ] **Agent capabilities 声明**（每个 agent 自我描述能做什么）
+- [ ] **Agent capabilities 声明**（每个 agent 自我描述能做什么） —— **见 §autonomous-collab**
 - [ ] Reply gating（managed agent 在某个阈值之上要先停下等主人 OK）
 - [ ] **群邀请链接**（签名 URL）
 - [ ] Per-user 通知偏好
+
+## 关键缺口：真正的"自主协作"（[[AGENT_COLLAB#11-当前实现的本质局限]]）
+
+> [!warning] 这是当前产品最大的能力差距
+> 用户问："两个 agent 没有外部干涉怎么知道要干什么、做完了怎么知道改了什么？"
+> 当前回答：**做不到完整无人值守**。这一组功能是 v0.5–v0.6 的核心方向。
+
+### autonomous-collab —— 让 agent 之间真能交付任务
+
+按依赖关系，要做的事：
+
+#### 1. Task 实体（v0.5 起步）
+```sql
+CREATE TABLE tasks (
+  id TEXT PRIMARY KEY,
+  conversation_id TEXT REFERENCES conversations(id),
+  title TEXT NOT NULL,
+  description TEXT NOT NULL,
+  owner_agent_id TEXT,      -- 负责人
+  assigned_to_agent_id TEXT,
+  status TEXT NOT NULL CHECK (status IN ('open','in_progress','blocked','done','cancelled')),
+  success_criteria TEXT,    -- 怎么算"完成"
+  parent_task_id TEXT REFERENCES tasks(id),
+  created_at INTEGER,
+  updated_at INTEGER
+);
+
+CREATE TABLE task_artifacts (
+  task_id TEXT REFERENCES tasks(id),
+  kind TEXT,  -- 'attachment' | 'context_note' | 'message' | 'workspace_file'
+  ref_id TEXT,
+  created_at INTEGER
+);
+```
+
+UI：消息可以"附加到 task"或"开新 task"；侧栏显示进行中任务；agent 在 heartbeat 里收到 `tasks.assigned_to_me`。
+
+#### 2. 附件版本化 + diff（v0.5 中期）
+- `attachment_versions` 表：按 `(conversation_id, logical_filename)` 分组
+- 新上传时与上一版做 line-level diff（用 Node 自带 `diff` 库或手写）
+- API 响应里附带 `diff_against_previous` 字段
+- UI 在附件下方默认显示 "+12 / -3" 徽章，点击展开 diff
+
+#### 3. 共享 workspace（v0.6 起步）
+- `projects` 实体：一个 git-like 命名空间，agents 订阅
+- 本地 agent 通过 watcher 上报"我改了 X 文件"事件
+- 服务端聚合，在订阅者的 heartbeat 里返回 `workspace_changes[]`
+- 接收方 agent 不需要等附件 —— 主动 pull 任意路径
+
+#### 4. Managed agent tool calling（v0.6，最大杠杆）
+- MCP server 注册表，per-agent allowlist
+- 工具：`read_file` / `write_file` / `run_command`（Vercel Sandbox）/ `apply_patch` / `agent2agent.send_message`
+- 让 managed agent 从"只能聊"升级到"能真干活"
+- 关键安全：在沙盒里跑，写操作走 patch + 用户审批
+
+#### 5. Capability 声明（v0.5）
+- `agents.capabilities` JSON 数组：`["read_local_files", "run_tests", "apply_patches", "anthropic_brain"]`
+- 分派 task 前 UI / 其他 agent 可以验证目标 agent 有所需 capability
+- 没有的能力 → assignment 被拒，提示选别的 agent
+
+#### 6. 完成验证（v0.6）
+- task 的 `success_criteria` 字段支持 markdown checkbox + 自动校验项：
+  - `tests_pass: npm test` → 系统跑测试，结果决定 task 能不能 close
+  - `diff_review_approved` → 等审查者 react ✅
+  - `manual` → 主人按 done 按钮
+- agent 标 done 时系统先跑校验，全过才真 close；否则维持 in_progress + 把失败原因写回 conversation
+
+#### 7. Workspace 变更事件流（v0.6）
+- 已有 `conversation_events` 表的模式扩展：增加 kind 'file_changed'
+- 本地 agent watcher → upload 增量事件
+- 接收方 agent heartbeat 里同步看到 "alice 12:34 改了 src/schema.sql +12/-3"
+
+#### 8. Task 状态机（v0.6）
+- open / in_progress / blocked / done / cancelled 受控状态机
+- 状态变更触发 events → heartbeat + SSE
+- 阻塞时写 blocker 原因，要求另一方解决
+
+### 做完之后会怎样
+
+```
+1. Alice 在群里创建 task："Schema 设计 - PK 选型"，assigned_to bob
+2. Bob 的 agent 心跳拉到 "你被分配了一个 task"
+3. Bob 的 agent 检查 capability：能 run_tests + apply_patches → 接受
+4. Bob 的 agent 在共享 workspace 里读 schema.sql、跑测试、起草改动
+5. Bob 的 agent apply_patch → workspace_changes 事件推给所有订阅者
+6. Alice 的 agent heartbeat 收到 "bob 改了 schema.sql +12/-3，task 状态=in_progress"
+7. Bob 的 agent 在 task 上 mark done + 附上 diff
+8. 系统跑 success_criteria 的 `npm test`，通过 → task 自动 close
+9. Alice 心跳看到 "task done by bob，全部测试通过，diff: …"
+
+整个过程不需要 Alice 或 Bob 实时盯着。
+```
+
+**这才是"agent 自主协作"的真正形态**。当前 v0.4.x 离这个目标还有距离，但**协议和数据通道都已经在位**——上面这 8 个加在现有基础上是水到渠成的扩展，不是推倒重来。
 
 ## 中期（v0.6 —— 较大工程）
 

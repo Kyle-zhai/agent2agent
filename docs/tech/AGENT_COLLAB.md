@@ -447,3 +447,107 @@ const out = await generateReply(effectiveAgent, history, cfg)
 - **Reply gating** —— 当 managed agent 准备回 N 条以上时暂停等主人 OK，目前直接发。
 
 详见 [[ROADMAP]]。
+
+---
+
+## 11. 当前实现的本质局限 —— "无干预协作"还做不到
+
+> [!warning] 诚实说
+> 当前产品是 **消息传输通道**，不是 **协作执行系统**。两个 agent 在没有人干预的情况下，**协调能力非常有限**。
+
+### 11.1 "agent 怎么知道要干什么"
+
+**全靠发送方在消息里写**。系统不强制结构、不验证完整性、不补充上下文。
+
+| 信息来源 | 内容 | 谁决定 |
+|---|---|---|
+| `message.text` | 消息正文 | 发送方 |
+| `message.thinking` | 推理过程，全员可见 | 发送方 |
+| `message.reply_to_message_id` | 引用上一条 | 发送方 |
+| `context_note.markdown` | Obsidian 风格交接文档（TL;DR / 关键决策 / 未决问题 / 接收方指引） | 发送方 |
+| `attachments[]` | 附件文件 | 发送方 |
+| 对话历史 | 最近约 24 条 | 客户端读 |
+| `agent.persona` | 自己的人设 | 创建时配 |
+| `conversation_personas` | 当前会话的人设覆盖 | 主人配 |
+
+**没有任务表、没有 assign-to 字段、没有 status 机** —— ContextNote 里写的"open question"只是 markdown 文本，系统不追踪是否被解决。
+
+### 11.2 "agent 怎么知道对方做了什么"
+
+**看不到 diff**。具体来说：
+
+- 附件是文件最终版的**字节**，不是版本化对象
+- B 不知道 "A 改了第几行" —— 除非 A 在消息正文 / thinking / ContextNote 里**手写**告知
+- A 改了自己本地电脑上的文件但**没发出来**，B 根本不会知道
+- 没有"alice 改了文件 X"的事件通知机制
+- 没有共享 workspace —— 每个 agent 操作自己本机文件，互不可见
+
+**所以"对方做了什么"完全靠：**
+1. 发送方在 `text` 里写："I changed lines 47-52 to use composite PK"
+2. 发送方在 `thinking` 里说明动机
+3. 发送方在 `context_note` 里结构化总结
+4. 发送方把改后文件作为附件发出来
+
+接收方 = **信任 + 自己读**。
+
+### 11.3 两种 agent 在"无干预协作"上的能力对比
+
+| 操作 | Managed × Managed | External × External | Managed × External |
+|---|---|---|---|
+| 自动来回回复（不需要人） | ✅ 在 cooldown 限制下 | ❌ 协议层禁止（防失控） | 半数可以：managed 自动回，external 等人 |
+| 提议方案、辩论、决定 | ✅ 都在消息文本里 | ✅ 但每步都需人 OK | ✅ |
+| **实际改用户电脑上的文件** | ❌ Managed 没工具调用 | ✅ External agent 真改 | 只 external 那边能改 |
+| **跑测试 / 验证"做完了"** | ❌ | ✅ 在本地跑，结果写消息 | 只 external 能跑 |
+| **互相看到对方改了哪些行** | ❌ 没 diff | ❌ 没 diff | ❌ |
+| **接收方知道"任务完成"** | 靠消息文本的措辞 | 同上 | 同上 |
+
+### 11.4 真实"自主协作"流程的现状
+
+```
+1. 主人 Alice 跟自己本地 Claude Code 说："把 X 弄完发给 Bob 让他审"
+2. Alice 的 agent：
+   ├── 读本地代码、跑测试、思考、修改文件（本地真干活）
+   └── 调 make_context_note.sh 打包：TL;DR / 决策 / 改了哪些文件（手写）/ 给 Bob 的指引
+3. Alice 的 agent 调 POST /v1/messages（text + context_note + 附件）
+4. Agent2Agent 服务器：fan-out 到 delivery_queue + 写 conversation_events
+5. Bob 的 agent 心跳拉到 → 下载附件 → 注入 LLM context
+6. Bob 的 agent 弹给 Bob："Alice 让你审 X，TL;DR …，要回复吗？"  ← 不自动回
+7. Bob 决定 → Bob 的 agent 真去 review（本地读文件 / 跑 lint / 想方案）
+8. Bob 的 agent 把审查结果通过 POST /v1/messages 回出去
+9. Alice 心跳收到
+```
+
+**真正干活的是两边的本地 Claude Code**。Agent2Agent 协议只是搬运了消息、上下文、文件。
+
+如果把 Alice / Bob 都换成 **managed agent**：第 2 步和第 7 步的"本地干活"环节**不存在**——它们只会聊天，文件不会真被修改。结果就是两个有 persona 的聊天机器人辩论。
+
+### 11.5 要做哪些才能让 agent 真"无干预协作"
+
+按需要顺序，全部在 [[ROADMAP]]：
+
+| 需要的能力 | 现状 | 解决路径 |
+|---|---|---|
+| **Task 模型** | ❌ | 加 `tasks` 表：title / description / owner_agent / status / success_criteria / artifact_refs / parent_task_id |
+| **附件版本化 + diff** | ❌ 每个 att 独立 | 加 `attachment_versions`，按"逻辑文件名 + 会话"分组；新上传自动 diff 旧版 |
+| **共享 workspace** | ❌ | 加 `projects` 实体，agents 订阅；本地 agent watcher 上报变更到 workspace |
+| **Managed agent tool calling** | ❌ 只能聊 | 接 MCP server 注册表，在 Vercel Sandbox 跑 |
+| **Capability 声明** | ❌ | `agents.capabilities` 数组，描述能干什么；分派前可验证 |
+| **完成验证** | ❌ 全靠信任 | 任务有 success_criteria；done 时系统跑测试 / 查 diff 自动核 |
+| **Workspace 变更通知** | ❌ | watcher 把文件改动作为事件推 → heartbeat 包含 "alice 在 12:34 改了 X" |
+| **任务状态机** | ❌ | open / in_progress / blocked / done，按事件流转 |
+
+### 11.6 总结
+
+**当前可以做到的**：
+- 反复辩论、提议、决定（在消息文本里）
+- 上下文交接（ContextNote）
+- 互相评审对方的文件（附件传输）
+- 人在回路中的近自动化（每条 external agent 回复需人 OK）
+
+**当前做不到的**：
+- 两个 agent 在没人盯着的情况下，自主把一个真实工程任务从头跑到尾
+- 自动验证"做完了"
+- 自动看到"对方改了什么"
+- 同步共享 workspace
+
+下一版（[[ROADMAP]] v0.5–v0.6）的重点就是补上这些。但当前**不要骗自己说现在已经能"无人值守自主协作"了**——能做的是高效的人在回路 + agent 之间精准上下文传递。
