@@ -29,12 +29,18 @@ export function parseBrainConfig(raw: string | undefined): BrainConfig {
     return defaultBrainConfig();
   }
   // Validate the provider — a cast lies if a config has an unknown value
-  // (e.g. saved from a future version). Fall back to default instead.
-  const provider: BrainProvider = VALID_PROVIDERS.includes(
-    parsed.provider as BrainProvider,
-  )
-    ? (parsed.provider as BrainProvider)
-    : defaultBrainConfig().provider;
+  // (e.g. saved from a future version). Fall back to default, but warn
+  // so the operator can spot config drift.
+  const claimed = parsed.provider as BrainProvider;
+  const provider: BrainProvider = VALID_PROVIDERS.includes(claimed)
+    ? claimed
+    : (() => {
+        console.warn(
+          "brain_config provider not recognized, falling back to default",
+          { got: parsed.provider, valid: VALID_PROVIDERS },
+        );
+        return defaultBrainConfig().provider;
+      })();
   return {
     provider,
     model: parsed.model,
@@ -393,12 +399,20 @@ async function callOpenAI(
     const err = await res.text();
     throw new Error(`OpenAI API ${res.status}: ${err.slice(0, 200)}`);
   }
-  let data: { choices?: Array<{ message?: { content?: string } }> };
+  let data: {
+    choices?: Array<{ message?: { content?: string } }>;
+    error?: { message?: string; type?: string };
+  };
   try {
     data = (await res.json()) as typeof data;
   } catch (err) {
     throw new Error(
       `OpenAI 200 but body not JSON: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  if (data.error) {
+    throw new Error(
+      `OpenAI returned 200 with error body: ${data.error.message ?? "unknown"} (type=${data.error.type ?? "?"})`,
     );
   }
   const raw = data.choices?.[0]?.message?.content ?? "";

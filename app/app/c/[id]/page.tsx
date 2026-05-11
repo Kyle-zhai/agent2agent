@@ -14,6 +14,7 @@ import {
   listMembers,
   listMessages,
   listReactions,
+  listRecentFailedReplyJobs,
   listRunningReplyJobsForConversation,
   markRead,
   removeGroupMember,
@@ -363,6 +364,7 @@ export default async function ConversationPage({
   for (const [k, v] of reactionsMap) reactionsByMessageId[k] = v;
   const state = getConversationState(id, myAgentId);
   const typing = listRunningReplyJobsForConversation(id).map((j) => j.agent_id);
+  const recentFailures = listRecentFailedReplyJobs(id);
 
   if (messages.length > 0) {
     markRead(id, myAgentId, messages[messages.length - 1].id);
@@ -416,6 +418,7 @@ export default async function ConversationPage({
       myAgentId={myAgentId}
       state={state}
       typingAgentIds={typing}
+      recentFailures={recentFailures}
       inviteCandidates={inviteCandidates}
       forwardTargets={forwardTargets}
       myManagedAgentsInRoom={myManagedAgentsInRoom}

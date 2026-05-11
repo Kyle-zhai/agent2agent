@@ -43,6 +43,7 @@ export function ConversationView({
   myAgentId,
   state,
   typingAgentIds,
+  recentFailures,
   inviteCandidates,
   forwardTargets,
   myManagedAgentsInRoom,
@@ -57,6 +58,13 @@ export function ConversationView({
   myAgentId: string;
   state: ConversationState;
   typingAgentIds: string[];
+  recentFailures: Array<{
+    job_id: string;
+    agent_id: string;
+    trigger_message_id: string | null;
+    last_error: string | null;
+    finished_at: number | null;
+  }>;
   inviteCandidates: Agent[];
   forwardTargets: ForwardTarget[];
   myManagedAgentsInRoom: Agent[];
@@ -87,12 +95,19 @@ export function ConversationView({
   );
   const myAgent = memberById[myAgentId];
 
+  const didInitialScrollRef = useRef(false);
   useEffect(() => {
-    // Only auto-scroll to bottom when the user is already near it. Yanking a
-    // reader who scrolled up to re-read history would be hostile when a
-    // managed agent posts a reply via SSE.
     const el = scrollRef.current;
     if (!el) return;
+    // First mount: always jump to bottom — that's the universal chat
+    // convention. Subsequent updates (SSE-triggered router.refresh): only
+    // auto-scroll if the user is already near the bottom, so readers
+    // scrolled up looking at history aren't yanked.
+    if (!didInitialScrollRef.current) {
+      didInitialScrollRef.current = true;
+      el.scrollTo({ top: el.scrollHeight, behavior: "auto" });
+      return;
+    }
     const nearBottom =
       el.scrollHeight - el.scrollTop - el.clientHeight < 120;
     if (nearBottom) {
@@ -346,6 +361,12 @@ export function ConversationView({
             )
           )}
           {typing.length > 0 ? <TypingRow agents={typing} /> : null}
+          {recentFailures.length > 0 ? (
+            <FailedRepliesRow
+              failures={recentFailures}
+              memberById={memberById}
+            />
+          ) : null}
         </div>
       </div>
 
@@ -1081,6 +1102,46 @@ function Thinking({ text, isMine }: { text: string; isMine: boolean }) {
           {text}
         </pre>
       ) : null}
+    </div>
+  );
+}
+
+function FailedRepliesRow({
+  failures,
+  memberById,
+}: {
+  failures: Array<{
+    job_id: string;
+    agent_id: string;
+    last_error: string | null;
+    finished_at: number | null;
+  }>;
+  memberById: Record<string, Agent>;
+}) {
+  return (
+    <div className="mt-3 space-y-1">
+      {failures.map((f) => {
+        const a = memberById[f.agent_id];
+        return (
+          <div
+            key={f.job_id}
+            className="flex items-start gap-2 text-[12px] text-[color:var(--color-ink-muted)] px-3 py-1.5 surface bg-[color:var(--color-danger-tint)]/40 border-[color:var(--color-danger)]/20"
+          >
+            <span aria-hidden>⚠️</span>
+            <div className="flex-1 min-w-0">
+              <span className="font-medium">
+                {a?.display_name ?? f.agent_id}
+              </span>{" "}
+              tried to reply and gave up
+              {f.last_error ? (
+                <>
+                  : <code className="font-mono text-[11px]">{f.last_error}</code>
+                </>
+              ) : null}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

@@ -50,7 +50,15 @@ export async function GET(
         const payload = `event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`;
         try {
           controller.enqueue(encoder.encode(payload));
-        } catch {
+        } catch (err) {
+          // Most common cause: client disconnected mid-write. Less common:
+          // JSON.stringify on a malformed payload. We don't want to bury
+          // either — even a benign disconnect shouldn't disappear silently.
+          console.warn("SSE send failed", {
+            conversationId: id,
+            eventName,
+            err: err instanceof Error ? err.message : String(err),
+          });
           close();
         }
       };

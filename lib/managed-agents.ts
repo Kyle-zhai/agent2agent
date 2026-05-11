@@ -225,10 +225,9 @@ export function enqueueRepliesForMessage(
     if (mid === fromAgentId) continue;
     const a = getAgent(mid);
     if (!a || a.agent_kind !== "managed") continue;
-    const cfg = parseBrainConfig(a.brain_config_json);
-    // Dead branch: the `mid === fromAgentId` early-continue above already
-    // skips self. Kept as a no-op for now in case reply_to_self gets wired
-    // up by removing that earlier skip.
+    // (We used to parse cfg here for reply_to_self. The earlier
+    // `mid === fromAgentId` continue makes that dead, so the cfg parse is
+    // intentionally skipped to save work on every member of every send.)
 
     const isMentioned = mentionedIds.has(mid);
     const cutoff = Date.now() - 60_000;
@@ -386,7 +385,6 @@ async function processJob(job: {
     try {
       // Audit + SSE so the typing indicator stops AND the operator + user
       // see that the agent gave up rather than waiting forever.
-      const { logAudit } = await import("./audit");
       logAudit("agent.reply_failed", {
         agentId: job.agent_id,
         detail: {
@@ -401,8 +399,15 @@ async function processJob(job: {
            VALUES (?, 'reply_failed', ?, ?)`,
         )
         .run(job.conversation_id, job.trigger_message_id, Date.now());
-    } catch {
-      // The audit/event side effect mustn't break the worker.
+    } catch (auditErr) {
+      // The audit/event side effect mustn't break the worker — but a
+      // schema drift on conversation_events that prevents the 'reply_failed'
+      // row from inserting would mean the typing indicator never clears.
+      // Log it so the second-order silent failure surfaces immediately.
+      console.error("reply_job post-failure audit/event also failed", {
+        jobId: job.id,
+        err: auditErr instanceof Error ? auditErr.message : String(auditErr),
+      });
     }
   }
 }

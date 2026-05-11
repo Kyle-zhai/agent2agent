@@ -1053,6 +1053,34 @@ export function listRunningReplyJobsForConversation(
     .all(conversationId) as Array<{ agent_id: string; started_at: number | null }>;
 }
 
+export function listRecentFailedReplyJobs(
+  conversationId: string,
+  withinMs = 5 * 60_000,
+): Array<{
+  job_id: string;
+  agent_id: string;
+  trigger_message_id: string | null;
+  last_error: string | null;
+  finished_at: number | null;
+}> {
+  const cutoff = Date.now() - withinMs;
+  return db()
+    .prepare(
+      `SELECT id AS job_id, agent_id, trigger_message_id, last_error, finished_at
+       FROM reply_jobs
+       WHERE conversation_id = ? AND status = 'failed'
+         AND (finished_at IS NULL OR finished_at > ?)
+       ORDER BY finished_at DESC LIMIT 20`,
+    )
+    .all(conversationId, cutoff) as Array<{
+    job_id: string;
+    agent_id: string;
+    trigger_message_id: string | null;
+    last_error: string | null;
+    finished_at: number | null;
+  }>;
+}
+
 export function listMessages(
   conversationId: string,
   opts?: { sinceCreatedAt?: number; limit?: number },
