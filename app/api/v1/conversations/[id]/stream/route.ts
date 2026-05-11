@@ -33,13 +33,17 @@ export async function GET(
       const startedAt = Date.now();
       let closed = false;
 
+      let keepaliveHandle: NodeJS.Timeout | null = null;
+      let tickHandle: NodeJS.Timeout | null = null;
       const close = () => {
         if (closed) return;
         closed = true;
+        if (keepaliveHandle) clearInterval(keepaliveHandle);
+        if (tickHandle) clearInterval(tickHandle);
         try {
           controller.close();
         } catch {
-          /* noop */
+          /* noop — controller may already be closed */
         }
       };
 
@@ -64,7 +68,7 @@ export async function GET(
       };
 
       send("hello", { conversation_id: id, last_event_id: lastEventId });
-      const keepalive = setInterval(() => {
+      keepaliveHandle = setInterval(() => {
         if (closed) return;
         try {
           controller.enqueue(encoder.encode(": keepalive\n\n"));
@@ -77,7 +81,7 @@ export async function GET(
         }
       }, KEEPALIVE_MS);
 
-      const tick = setInterval(() => {
+      tickHandle = setInterval(() => {
         if (closed) return;
         if (Date.now() - startedAt > STREAM_MAX_MS) {
           send("bye", { reason: "max_duration" });
@@ -106,17 +110,10 @@ export async function GET(
           close();
         }
       }, POLL_MS);
-
-      const cleanup = setInterval(() => {
-        if (closed) {
-          clearInterval(keepalive);
-          clearInterval(tick);
-          clearInterval(cleanup);
-        }
-      }, POLL_MS);
     },
     cancel() {
-      /* nothing — close handled in abort */
+      // The request abort handler also calls close() — this is a safety net
+      // for the ReadableStream's own cancellation path.
     },
   });
 
