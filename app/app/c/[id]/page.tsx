@@ -3,16 +3,17 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth";
 import { getAgent } from "@/lib/agents";
 import {
+  addGroupMember,
   deleteMessage,
   editMessage,
   getConversation,
   getConversationState,
-  listConversationEventsAfter,
   listMembers,
   listMessages,
   listReactions,
   listRunningReplyJobsForConversation,
   markRead,
+  removeGroupMember,
   requireUserMember,
   saveAttachment,
   saveContextNote,
@@ -21,6 +22,7 @@ import {
   toggleConversationState,
   toggleReaction,
 } from "@/lib/conversations";
+import { listFriendsOfAgent } from "@/lib/friends";
 import { ensureManagedAgentHooks } from "@/lib/managed-agents-init";
 import { ConversationView } from "@/components/ConversationView";
 import type { ReactionAggregate } from "@/lib/types";
@@ -209,6 +211,62 @@ async function renameGroupAction(formData: FormData) {
   redirect(`/app/c/${conversationId}`);
 }
 
+async function addMemberAction(formData: FormData) {
+  "use server";
+  const user = await requireUser();
+  const conversationId = String(formData.get("conversation_id") ?? "");
+  const newMemberId = String(formData.get("agent_id") ?? "");
+  const { myAgentId } = requireUserMember(conversationId, user.id);
+  try {
+    addGroupMember(conversationId, myAgentId, newMemberId);
+  } catch (err) {
+    redirect(
+      `/app/c/${conversationId}?error=${encodeURIComponent(
+        err instanceof Error ? err.message : "Add failed.",
+      )}`,
+    );
+  }
+  revalidatePath("/app", "layout");
+  redirect(`/app/c/${conversationId}`);
+}
+
+async function removeMemberAction(formData: FormData) {
+  "use server";
+  const user = await requireUser();
+  const conversationId = String(formData.get("conversation_id") ?? "");
+  const removeAgentId = String(formData.get("agent_id") ?? "");
+  const { myAgentId } = requireUserMember(conversationId, user.id);
+  try {
+    removeGroupMember(conversationId, myAgentId, removeAgentId);
+  } catch (err) {
+    redirect(
+      `/app/c/${conversationId}?error=${encodeURIComponent(
+        err instanceof Error ? err.message : "Remove failed.",
+      )}`,
+    );
+  }
+  revalidatePath("/app", "layout");
+  redirect(`/app/c/${conversationId}`);
+}
+
+async function leaveGroupAction(formData: FormData) {
+  "use server";
+  const user = await requireUser();
+  const conversationId = String(formData.get("conversation_id") ?? "");
+  const { myAgentId } = requireUserMember(conversationId, user.id);
+  try {
+    removeGroupMember(conversationId, myAgentId, myAgentId);
+  } catch (err) {
+    redirect(
+      `/app/c/${conversationId}?error=${encodeURIComponent(
+        err instanceof Error ? err.message : "Leave failed.",
+      )}`,
+    );
+  }
+  revalidatePath("/app", "layout");
+  redirect("/app");
+}
+
 export default async function ConversationPage({
   params,
   searchParams,
@@ -237,6 +295,16 @@ export default async function ConversationPage({
     markRead(id, myAgentId, messages[messages.length - 1].id);
   }
 
+  // For group owner: agents friended with me that aren't yet members.
+  const memberSet = new Set(memberAgents.map((a) => a.id));
+  const inviteCandidates =
+    conv.type === "group" && conv.created_by_agent_id === myAgentId
+      ? listFriendsOfAgent(myAgentId)
+          .filter((id) => !memberSet.has(id))
+          .map((id) => getAgent(id))
+          .filter((a): a is NonNullable<ReturnType<typeof getAgent>> => !!a)
+      : [];
+
   return (
     <ConversationView
       conv={conv}
@@ -246,6 +314,7 @@ export default async function ConversationPage({
       myAgentId={myAgentId}
       state={state}
       typingAgentIds={typing}
+      inviteCandidates={inviteCandidates}
       actions={{
         send: sendMessageAction,
         edit: editMessageAction,
@@ -255,6 +324,9 @@ export default async function ConversationPage({
         mute: toggleMuteAction,
         archive: toggleArchiveAction,
         rename: renameGroupAction,
+        addMember: addMemberAction,
+        removeMember: removeMemberAction,
+        leave: leaveGroupAction,
       }}
       error={error}
     />

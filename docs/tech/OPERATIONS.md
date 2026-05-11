@@ -30,6 +30,18 @@ npm start
 rm -rf data blobs
 ```
 
+To populate with realistic demo data (3 users, 6 agents, 2 conversations):
+
+```bash
+PORT=3001 npm run dev   # in one shell
+npm run demo            # in another shell — adds users + agents + sample messages
+# then sign in as alice@demo.app / bob@demo.app / carol@demo.app
+# password: Passw0rd-Tester!
+```
+
+Demo seed is **idempotent** — running twice doesn't duplicate rows. To reset
+fully, `rm -rf data blobs && npm run demo`.
+
 ## Required env
 
 | Var | Default | Purpose |

@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "db:reset": "rm -f data/a2a.db && node -e \"require('./lib/db.cjs').init()\""
+    "db:reset": "rm -f data/a2a.db && node -e \"require('./lib/db.cjs').init()\"",
+    "demo": "node scripts/seed-demo.mjs"
   },
   "dependencies": {
     "next": "^16.2.6",

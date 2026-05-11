@@ -24,6 +24,9 @@ type ChatActions = {
   mute: (formData: FormData) => Promise<void>;
   archive: (formData: FormData) => Promise<void>;
   rename: (formData: FormData) => Promise<void>;
+  addMember: (formData: FormData) => Promise<void>;
+  removeMember: (formData: FormData) => Promise<void>;
+  leave: (formData: FormData) => Promise<void>;
 };
 
 export function ConversationView({
@@ -34,6 +37,7 @@ export function ConversationView({
   myAgentId,
   state,
   typingAgentIds,
+  inviteCandidates,
   actions,
   error,
 }: {
@@ -44,15 +48,19 @@ export function ConversationView({
   myAgentId: string;
   state: ConversationState;
   typingAgentIds: string[];
+  inviteCandidates: Agent[];
   actions: ChatActions;
   error?: string;
 }) {
+  const isGroupOwner =
+    conv.type === "group" && conv.created_by_agent_id === myAgentId;
   const [showContext, setShowContext] = useState(false);
   const [showThinking, setShowThinking] = useState(false);
   const [replyTo, setReplyTo] = useState<MessageWithRelations | null>(null);
   const [editing, setEditing] = useState<MessageWithRelations | null>(null);
   const [showHeaderMenu, setShowHeaderMenu] = useState(false);
   const [showRename, setShowRename] = useState(false);
+  const [showMembers, setShowMembers] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
@@ -203,19 +211,47 @@ export function ConversationView({
                   action={actions.archive}
                   convId={conv.id}
                 />
-                {conv.type === "group" &&
-                conv.created_by_agent_id === myAgentId ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowHeaderMenu(false);
-                      setShowRename(true);
-                    }}
-                    className="w-full text-left px-3 py-1.5 text-sm hover:bg-[color:var(--color-canvas)] flex items-center gap-2"
-                  >
-                    <span>✏️</span>
-                    <span>Rename group</span>
-                  </button>
+                {conv.type === "group" && isGroupOwner ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowHeaderMenu(false);
+                        setShowRename(true);
+                      }}
+                      className="w-full text-left px-3 py-1.5 text-sm hover:bg-[color:var(--color-canvas)] flex items-center gap-2"
+                    >
+                      <span>✏️</span>
+                      <span>Rename group</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowHeaderMenu(false);
+                        setShowMembers(true);
+                      }}
+                      className="w-full text-left px-3 py-1.5 text-sm hover:bg-[color:var(--color-canvas)] flex items-center gap-2"
+                    >
+                      <span>👥</span>
+                      <span>Manage members</span>
+                    </button>
+                  </>
+                ) : null}
+                {conv.type === "group" && !isGroupOwner ? (
+                  <form action={actions.leave}>
+                    <input
+                      type="hidden"
+                      name="conversation_id"
+                      value={conv.id}
+                    />
+                    <button
+                      type="submit"
+                      className="w-full text-left px-3 py-1.5 text-sm hover:bg-[color:var(--color-danger-tint)] text-[color:var(--color-danger)] flex items-center gap-2"
+                    >
+                      <span>🚪</span>
+                      <span>Leave group</span>
+                    </button>
+                  </form>
                 ) : null}
               </div>
             ) : null}
@@ -229,6 +265,18 @@ export function ConversationView({
           current={conv.title ?? ""}
           action={actions.rename}
           onClose={() => setShowRename(false)}
+        />
+      ) : null}
+
+      {showMembers ? (
+        <MemberManagerBar
+          convId={conv.id}
+          members={members}
+          ownerId={conv.created_by_agent_id}
+          inviteCandidates={inviteCandidates}
+          addAction={actions.addMember}
+          removeAction={actions.removeMember}
+          onClose={() => setShowMembers(false)}
         />
       ) : null}
 
@@ -294,6 +342,82 @@ function ConvMenuItem({
         <span>{label}</span>
       </button>
     </form>
+  );
+}
+
+function MemberManagerBar({
+  convId,
+  members,
+  ownerId,
+  inviteCandidates,
+  addAction,
+  removeAction,
+  onClose,
+}: {
+  convId: string;
+  members: Agent[];
+  ownerId: string;
+  inviteCandidates: Agent[];
+  addAction: (fd: FormData) => Promise<void>;
+  removeAction: (fd: FormData) => Promise<void>;
+  onClose: () => void;
+}) {
+  return (
+    <div className="bg-[color:var(--color-tint-violet)]/40 border-b border-[color:var(--color-line)] px-5 py-3">
+      <div className="max-w-3xl mx-auto">
+        <div className="flex items-center justify-between mb-2">
+          <span className="font-medium text-sm">Members ({members.length})</span>
+          <button
+            type="button"
+            onClick={onClose}
+            className="btn btn-ghost btn-sm"
+          >
+            Close
+          </button>
+        </div>
+        <ul className="flex flex-wrap gap-1.5 mb-3">
+          {members.map((m) => (
+            <li key={m.id} className="inline-flex items-center gap-1.5 surface px-2 py-1 text-xs">
+              <span>{m.avatar_emoji}</span>
+              <span className="font-mono">{m.id}</span>
+              {m.id === ownerId ? <span className="tag tag-amber">owner</span> : null}
+              {m.id !== ownerId ? (
+                <form action={removeAction} className="contents">
+                  <input type="hidden" name="conversation_id" value={convId} />
+                  <input type="hidden" name="agent_id" value={m.id} />
+                  <button
+                    type="submit"
+                    title="Remove from group"
+                    className="text-[color:var(--color-ink-soft)] hover:text-[color:var(--color-danger)] ml-0.5"
+                  >
+                    ✕
+                  </button>
+                </form>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+        {inviteCandidates.length > 0 ? (
+          <form action={addAction} className="flex items-center gap-2">
+            <input type="hidden" name="conversation_id" value={convId} />
+            <select name="agent_id" className="input !py-1.5 !text-xs flex-1 font-mono">
+              {inviteCandidates.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.avatar_emoji} {a.id}
+                </option>
+              ))}
+            </select>
+            <button type="submit" className="btn btn-primary btn-sm">
+              Add to group
+            </button>
+          </form>
+        ) : (
+          <div className="text-xs text-[color:var(--color-ink-muted)]">
+            All your friend agents are already in this group.
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -513,25 +637,43 @@ function Bubble({
             ) : null}
             {message.attachments.length > 0 && !message.deleted_at ? (
               <div className="mt-1.5 flex flex-wrap gap-1.5">
-                {message.attachments.map((a) => (
-                  <a
-                    key={a.id}
-                    href={`/api/v1/blobs/${a.id}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-[12px] ${
-                      isMine
-                        ? "bg-white/15 hover:bg-white/25"
-                        : "bg-black/5 hover:bg-black/10"
-                    }`}
-                  >
-                    <span>📎</span>
-                    <span className="font-medium truncate max-w-[180px]">
-                      {a.filename}
-                    </span>
-                    <span className="opacity-70">{formatBytes(a.size_bytes)}</span>
-                  </a>
-                ))}
+                {message.attachments.map((a) =>
+                  a.mime_type.startsWith("image/") ? (
+                    <a
+                      key={a.id}
+                      href={`/api/v1/blobs/${a.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block rounded-lg overflow-hidden border border-black/5 max-w-[280px]"
+                      title={`${a.filename} · ${formatBytes(a.size_bytes)}`}
+                    >
+                      <img
+                        src={`/api/v1/blobs/${a.id}`}
+                        alt={a.filename}
+                        className="block max-h-[320px] w-auto"
+                        loading="lazy"
+                      />
+                    </a>
+                  ) : (
+                    <a
+                      key={a.id}
+                      href={`/api/v1/blobs/${a.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-[12px] ${
+                        isMine
+                          ? "bg-white/15 hover:bg-white/25"
+                          : "bg-black/5 hover:bg-black/10"
+                      }`}
+                    >
+                      <span>📎</span>
+                      <span className="font-medium truncate max-w-[180px]">
+                        {a.filename}
+                      </span>
+                      <span className="opacity-70">{formatBytes(a.size_bytes)}</span>
+                    </a>
+                  ),
+                )}
               </div>
             ) : null}
             {message.context_note && !message.deleted_at ? (

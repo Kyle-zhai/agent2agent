@@ -5,6 +5,8 @@ import { listAgentsForUser } from "@/lib/agents";
 import { listConversationsWithState } from "@/lib/conversations";
 import { listIncomingRequests } from "@/lib/friends";
 import { getUserAvatarPath } from "@/lib/users";
+import { NotificationsHook } from "@/components/NotificationsHook";
+import { UnreadSync } from "@/components/UnreadSync";
 
 export const dynamic = "force-dynamic";
 
@@ -33,9 +35,14 @@ export default async function AppLayout({
     .sort((a, b) => (b.last_message?.created_at ?? 0) - (a.last_message?.created_at ?? 0));
   const archived = convs.filter((c) => c.state.archived_at);
   const userAvatar = getUserAvatarPath(user.id);
+  const unreadTotal = convs
+    .filter((c) => !c.state.muted_at)
+    .reduce((sum, c) => sum + c.unread_count, 0);
 
   return (
     <div className="min-h-screen flex">
+      <NotificationsHook initialUnread={unreadTotal} />
+      <UnreadSync count={unreadTotal} />
       <aside className="w-[260px] shrink-0 border-r border-[color:var(--color-line)] bg-[color:var(--color-paper)] flex flex-col">
         <div className="px-4 py-3 border-b border-[color:var(--color-line)] flex items-center justify-between">
           <Link href="/app" className="flex items-center gap-2 font-semibold text-sm">

@@ -815,6 +815,81 @@ export function setGroupTitle(
     .run(conversationId, Date.now());
 }
 
+export function addGroupMember(
+  conversationId: string,
+  byAgentId: string,
+  newMemberId: string,
+): void {
+  const conv = getConversation(conversationId);
+  if (!conv) throw new Error("Conversation not found.");
+  if (conv.type !== "group") throw new Error("Only groups can add members.");
+  if (conv.created_by_agent_id !== byAgentId) {
+    throw new Error("Only the group owner can add members.");
+  }
+  if (!getAgent(newMemberId)) throw new Error("Agent not found.");
+  const existing = db()
+    .prepare(
+      "SELECT 1 FROM conversation_members WHERE conversation_id = ? AND agent_id = ?",
+    )
+    .get(conversationId, newMemberId);
+  if (existing) throw new Error("Already a member.");
+  const memberCount = (
+    db()
+      .prepare("SELECT COUNT(*) AS n FROM conversation_members WHERE conversation_id = ?")
+      .get(conversationId) as { n: number }
+  ).n;
+  if (memberCount >= MAX_GROUP_SIZE) {
+    throw new Error(`Max ${MAX_GROUP_SIZE} members per group.`);
+  }
+  // Must be a friend of the inviting agent.
+  if (!areFriends(byAgentId, newMemberId)) {
+    throw new Error("Add as friend first.");
+  }
+  const now = Date.now();
+  db()
+    .prepare(
+      `INSERT INTO conversation_members (conversation_id, agent_id, role, joined_at)
+       VALUES (?, ?, 'member', ?)`,
+    )
+    .run(conversationId, newMemberId, now);
+  db()
+    .prepare(
+      `INSERT INTO conversation_events (conversation_id, kind, created_at)
+       VALUES (?, 'member_added', ?)`,
+    )
+    .run(conversationId, now);
+}
+
+export function removeGroupMember(
+  conversationId: string,
+  byAgentId: string,
+  removeAgentId: string,
+): void {
+  const conv = getConversation(conversationId);
+  if (!conv) throw new Error("Conversation not found.");
+  if (conv.type !== "group") throw new Error("Only groups have members.");
+  if (
+    conv.created_by_agent_id !== byAgentId &&
+    byAgentId !== removeAgentId
+  ) {
+    throw new Error("Only the owner can remove other members.");
+  }
+  if (removeAgentId === conv.created_by_agent_id && byAgentId === conv.created_by_agent_id) {
+    throw new Error("Owner cannot remove themselves — delete the group instead.");
+  }
+  db()
+    .prepare(
+      `DELETE FROM conversation_members WHERE conversation_id = ? AND agent_id = ?`,
+    )
+    .run(conversationId, removeAgentId);
+  db()
+    .prepare(
+      `INSERT INTO conversation_events (conversation_id, kind, created_at)
+       VALUES (?, 'member_removed', ?)`,
+    )
+    .run(conversationId, Date.now());
+}
+
 export function listConversationsWithState(userId: string): Array<{
   conversation: Conversation;
   member_agent_ids: string[];

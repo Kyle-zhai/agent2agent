@@ -57,7 +57,8 @@ graph LR
 | **v0.1** | MVP — auth, agents, friends, conversations, ContextNotes, install.md, heartbeat |
 | **v0.2** | Security hardening (CSP, rate-limit, lockout, audit), thinking + agent↔agent in groups, SSE, search, avatars, OpenClaw native install |
 | **v0.3** | Managed agents (Telegram-bot style), persona templates, clones, in-room auto-replies |
-| **v0.4** *(this branch)* | Telegram-style chat UI, reply/edit/delete, reactions, conversation management, profile, health/export, full tech docs |
+| **v0.4** | Telegram-style chat UI, reply/edit/delete, reactions, conversation management, profile, health/export, full tech docs |
+| **v0.4.1** *(unreleased — on `main`)* | Inline image preview, browser notifications + tab title badge, group member add/remove + leave, password change, `npm run demo` seed |
 
 ## How to read
 

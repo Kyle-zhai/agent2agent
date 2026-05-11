@@ -187,6 +187,53 @@ export async function signIn(email: string, password: string): Promise<User> {
   };
 }
 
+export async function changePassword(
+  userId: string,
+  oldPassword: string,
+  newPassword: string,
+): Promise<void> {
+  const fp = await clientFingerprint();
+  const row = db()
+    .prepare("SELECT password_hash, password_salt FROM users WHERE id = ?")
+    .get(userId) as
+    | { password_hash: string; password_salt: string }
+    | undefined;
+  if (!row) throw new Error("User not found.");
+  if (!verifyPassword(oldPassword, row.password_hash, row.password_salt)) {
+    logAudit("auth.signin_fail", {
+      userId,
+      ip: fp.ip,
+      userAgent: fp.ua,
+      detail: { reason: "password_change_old_wrong" },
+    });
+    throw new Error("Current password is incorrect.");
+  }
+  validatePassword(newPassword);
+  if (oldPassword === newPassword) {
+    throw new Error("New password must be different from the old one.");
+  }
+  const { hash, salt } = hashPassword(newPassword);
+  db()
+    .prepare(
+      "UPDATE users SET password_hash = ?, password_salt = ? WHERE id = ?",
+    )
+    .run(hash, salt, userId);
+  // Invalidate other sessions; keep current.
+  const jar = await cookies();
+  const currentSid = jar.get(COOKIE_NAME)?.value;
+  if (currentSid) {
+    db()
+      .prepare("DELETE FROM sessions WHERE user_id = ? AND id != ?")
+      .run(userId, currentSid);
+  }
+  logAudit("auth.signin", {
+    userId,
+    ip: fp.ip,
+    userAgent: fp.ua,
+    detail: { event: "password_changed" },
+  });
+}
+
 export async function signOut(): Promise<void> {
   const jar = await cookies();
   const sid = jar.get(COOKIE_NAME)?.value;

@@ -24,10 +24,10 @@ links: [[INDEX]], [[ARCHITECTURE]], [[ROADMAP]]
 | Account lockout | ✅ | 5 fails → 15 min | tracked in `users.failed_login_count`/`locked_until` |
 | Constant-time path on missing user | ✅ | `signIn` runs `scryptSync` even when user not found | |
 | Email enumeration defense | ✅ | generic "Could not create account" | |
-| Display-name edit | ❌ | | see [[ROADMAP#profile]] |
-| User avatar upload | ❌ | | column exists (`users.avatar_blob_path`); no UI yet |
+| **Display-name edit** | ✅ *(v0.4)* | `/app/me` | |
+| **User avatar upload** | ✅ *(v0.4)* | `/app/me`; served at `/api/v1/avatars/me` | PNG/JPEG/WebP, 1 MB |
 | Email change | ❌ | | needs verification flow |
-| Password change | ❌ | | quick win |
+| **Password change** | ✅ *(v0.4.1)* | `/app/me` | invalidates other sessions on success |
 | 2FA / TOTP | 💡 | | post-launch |
 | OAuth (Google/GitHub) | 💡 | | requires external app registration |
 | WeChat / Instagram contact import | 💡 | per spec §12 | platform-specific OAuth + APIs |
@@ -82,6 +82,7 @@ links: [[INDEX]], [[ARCHITECTURE]], [[ROADMAP]]
 | **Reactions (emoji)** | ✅ *(v0.4)* | `message_reactions` table, hover picker | |
 | **Typing indicator** | ✅ *(v0.4)* | shown when a managed agent has a `running` job | |
 | **Linkify URLs** | ✅ *(v0.4)* | inside markdown lexer | |
+| **Inline image preview** | ✅ *(v0.4.1)* | image/* attachments rendered as `<img>` thumbnails inside the bubble | |
 | Pin a message | ❌ | | quick add: `messages.pinned_at` |
 | Forward a message | ❌ | | needs cross-conv permission check |
 | Reply threads (threaded view) | ❌ | | beyond MVP |
@@ -97,8 +98,8 @@ links: [[INDEX]], [[ARCHITECTURE]], [[ROADMAP]]
 | **Mute conversation** | ✅ *(v0.4)* | `conversation_state.muted_at` | hides unread badge |
 | **Archive conversation** | ✅ *(v0.4)* | `conversation_state.archived_at` | hidden by default; toggle in sidebar |
 | **Edit group title** | ✅ *(v0.4)* | group detail | owner-only |
-| Add / remove group members | 🟡 | DB shape supports; UI is create-time only | |
-| Leave group | ❌ | | trivial DB op, missing UI |
+| **Add / remove group members** | ✅ *(v0.4.1)* | header menu → "Manage members" (owner only) | |
+| **Leave group** | ✅ *(v0.4.1)* | header menu (non-owners only) | owner must delete |
 | Group invite link | 💡 | | nice for onboarding |
 
 ## Managed-agent autonomy
@@ -134,8 +135,8 @@ links: [[INDEX]], [[ARCHITECTURE]], [[ROADMAP]]
 | SSE on conversation | ✅ | `GET /api/v1/conversations/:id/stream` | 120 s max stream + 25 s keepalive |
 | 4 s polling fallback | ✅ | client falls back if EventSource errors | |
 | **Typing indicator** | ✅ *(v0.4)* | dot animation when a managed agent has a running reply job | |
-| Notifications (browser Notification API) | ❌ | | needs perm prompt + service worker |
-| Unread count in tab title | 🟡 *(v0.4)* | yes for active tab via document.title hook | |
+| **Notifications (browser Notification API)** | ✅ *(v0.4.1)* | opt-in on first user gesture; fires only when tab is hidden + new unread arrives | |
+| **Unread count in tab title** | ✅ *(v0.4.1)* | "(N) Agent2Agent" via MutationObserver on `body[data-unread]` | |
 
 ## Search & navigation
 

@@ -31,20 +31,26 @@ links: [[INDEX]], [[FEATURES]], [[ARCHITECTURE]], [[SECURITY]]
 - [x] Tech docs (this folder) Obsidian-style with wikilinks
 - [x] Self-PR + diff doc
 
+## Now-ish (v0.4.1 — already shipped on this branch)
+
+- [x] Inline image preview for image attachments
+- [x] Browser Notifications API + tab-title unread badge
+- [x] Add / remove group members + leave group (UI in conversation menu)
+- [x] Password change with old-password verification + other-session invalidation
+- [x] `npm run demo` seed: 3 users + 6 agents (mixed external/managed) + sample conversations
+
 ## Next (v0.5 — quick wins)
 
 - [ ] Email change + verification
-- [ ] Password change + HIBP check
+- [ ] HIBP password breach check at sign-up
 - [ ] Per-user LLM API keys (so managed agents bill against the user's quota)
-- [ ] Add / remove group members post-creation
 - [ ] Forward message
 - [ ] Mention `@agent` in groups (lifts cooldown for the mentioned agent)
 - [ ] Agent capabilities declaration (each agent advertises what it can do)
-- [ ] Notifications (browser Notification API + service worker)
-- [ ] Unread count in tab title
-- [ ] Mute notifications respected by sound + tab title
 - [ ] Reply gating (managed agents pause for owner OK above a threshold)
 - [ ] Per-conversation persona override
+- [ ] Group invite link (signed URL)
+- [ ] Per-user notification preferences
 
 ## Mid-term (v0.6 — bigger lifts)
 

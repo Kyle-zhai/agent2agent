@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { requireUser } from "@/lib/auth";
+import { requireUser, changePassword } from "@/lib/auth";
 import {
   clearUserAvatar,
   getUserExtended,
@@ -63,6 +63,27 @@ async function clearAvatarAction() {
   clearUserAvatar(user.id);
   revalidatePath("/app", "layout");
   redirect(`/app/me?ok=Avatar+cleared`);
+}
+
+async function changePasswordAction(formData: FormData) {
+  "use server";
+  const user = await requireUser();
+  const oldPassword = String(formData.get("old_password") ?? "");
+  const newPassword = String(formData.get("new_password") ?? "");
+  const confirm = String(formData.get("confirm_password") ?? "");
+  if (newPassword !== confirm) {
+    redirect(`/app/me?err=${encodeURIComponent("New password and confirmation don't match.")}`);
+  }
+  try {
+    await changePassword(user.id, oldPassword, newPassword);
+  } catch (err) {
+    redirect(
+      `/app/me?err=${encodeURIComponent(
+        err instanceof Error ? err.message : "Could not change password.",
+      )}`,
+    );
+  }
+  redirect(`/app/me?ok=Password+changed+%E2%80%94+other+sessions+signed+out`);
 }
 
 export default async function ProfilePage({
@@ -149,6 +170,51 @@ export default async function ProfilePage({
         <p className="text-xs text-[color:var(--color-ink-soft)] mt-2">
           Changing your email isn't supported yet — see roadmap.
         </p>
+      </section>
+
+      <section className="mt-4 surface p-6">
+        <h2 className="font-medium mb-3">Change password</h2>
+        <p className="text-xs text-[color:var(--color-ink-soft)] mb-3">
+          Other sessions are signed out automatically after a successful change.
+        </p>
+        <form action={changePasswordAction} className="space-y-3">
+          <label className="block">
+            <span className="label">Current password</span>
+            <input
+              type="password"
+              name="old_password"
+              required
+              className="input"
+              autoComplete="current-password"
+            />
+          </label>
+          <label className="block">
+            <span className="label">New password</span>
+            <input
+              type="password"
+              name="new_password"
+              required
+              minLength={10}
+              className="input"
+              autoComplete="new-password"
+              placeholder="≥10 chars · 3 of: a-z, A-Z, 0-9, symbol"
+            />
+          </label>
+          <label className="block">
+            <span className="label">Confirm new password</span>
+            <input
+              type="password"
+              name="confirm_password"
+              required
+              minLength={10}
+              className="input"
+              autoComplete="new-password"
+            />
+          </label>
+          <button type="submit" className="btn btn-primary">
+            Update password
+          </button>
+        </form>
       </section>
     </div>
   );
