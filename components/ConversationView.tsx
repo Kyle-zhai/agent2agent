@@ -30,6 +30,7 @@ type ChatActions = {
   removeMember: (formData: FormData) => Promise<void>;
   leave: (formData: FormData) => Promise<void>;
   forward: (formData: FormData) => Promise<void>;
+  setPersonaOverride: (formData: FormData) => Promise<void>;
 };
 
 type ForwardTarget = { id: string; label: string };
@@ -44,6 +45,8 @@ export function ConversationView({
   typingAgentIds,
   inviteCandidates,
   forwardTargets,
+  myManagedAgentsInRoom,
+  personaOverrides,
   actions,
   error,
 }: {
@@ -56,6 +59,8 @@ export function ConversationView({
   typingAgentIds: string[];
   inviteCandidates: Agent[];
   forwardTargets: ForwardTarget[];
+  myManagedAgentsInRoom: Agent[];
+  personaOverrides: Record<string, string>;
   actions: ChatActions;
   error?: string;
 }) {
@@ -68,6 +73,7 @@ export function ConversationView({
   const [showHeaderMenu, setShowHeaderMenu] = useState(false);
   const [showRename, setShowRename] = useState(false);
   const [showMembers, setShowMembers] = useState(false);
+  const [showPersonas, setShowPersonas] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
@@ -249,6 +255,19 @@ export function ConversationView({
                     </button>
                   </>
                 ) : null}
+                {myManagedAgentsInRoom.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowHeaderMenu(false);
+                      setShowPersonas(true);
+                    }}
+                    className="w-full text-left px-3 py-1.5 text-sm hover:bg-[color:var(--color-canvas)] flex items-center gap-2"
+                  >
+                    <span>🎭</span>
+                    <span>Per-chat persona override</span>
+                  </button>
+                ) : null}
                 {conv.type === "group" && !isGroupOwner ? (
                   <form action={actions.leave}>
                     <input
@@ -289,6 +308,16 @@ export function ConversationView({
           addAction={actions.addMember}
           removeAction={actions.removeMember}
           onClose={() => setShowMembers(false)}
+        />
+      ) : null}
+
+      {showPersonas ? (
+        <PersonaOverrideBar
+          convId={conv.id}
+          agents={myManagedAgentsInRoom}
+          overrides={personaOverrides}
+          action={actions.setPersonaOverride}
+          onClose={() => setShowPersonas(false)}
         />
       ) : null}
 
@@ -356,6 +385,75 @@ function ConvMenuItem({
         <span>{label}</span>
       </button>
     </form>
+  );
+}
+
+function PersonaOverrideBar({
+  convId,
+  agents,
+  overrides,
+  action,
+  onClose,
+}: {
+  convId: string;
+  agents: Agent[];
+  overrides: Record<string, string>;
+  action: (fd: FormData) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [selected, setSelected] = useState(agents[0]?.id ?? "");
+  const current = overrides[selected] ?? "";
+  return (
+    <div className="bg-[color:var(--color-tint-violet)]/30 border-b border-[color:var(--color-line)] px-5 py-3">
+      <div className="max-w-3xl mx-auto">
+        <div className="flex items-center justify-between mb-2">
+          <span className="font-medium text-sm">
+            Per-chat persona override
+          </span>
+          <button
+            type="button"
+            onClick={onClose}
+            className="btn btn-ghost btn-sm"
+          >
+            Close
+          </button>
+        </div>
+        <p className="text-[12px] text-[color:var(--color-ink-muted)] mb-2">
+          Make one of your managed agents act differently <em>just in this conversation</em>. Leave the field empty to clear the override and fall back to the agent's base persona.
+        </p>
+        <form action={action} className="space-y-2" key={selected}>
+          <input type="hidden" name="conversation_id" value={convId} />
+          <div className="flex items-center gap-2">
+            <select
+              name="agent_id"
+              value={selected}
+              onChange={(e) => setSelected(e.target.value)}
+              className="input !py-1.5 !text-xs font-mono"
+            >
+              {agents.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.avatar_emoji} {a.id}
+                  {overrides[a.id] ? " (override active)" : ""}
+                </option>
+              ))}
+            </select>
+            <span className="text-[11px] text-[color:var(--color-ink-soft)]">
+              {current ? `${current.length} chars overriding` : "no override set"}
+            </span>
+          </div>
+          <textarea
+            name="persona"
+            className="input min-h-[100px] font-mono text-[12px]"
+            defaultValue={current}
+            placeholder="In this conversation, behave like… (leave blank to clear)"
+            maxLength={4000}
+          />
+          <button type="submit" className="btn btn-primary btn-sm">
+            Save override
+          </button>
+        </form>
+      </div>
+    </div>
   );
 }
 

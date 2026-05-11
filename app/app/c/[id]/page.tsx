@@ -9,6 +9,7 @@ import {
   forwardMessage,
   getConversation,
   getConversationState,
+  getPersonaOverride,
   listConversationsWithState,
   listMembers,
   listMessages,
@@ -21,6 +22,7 @@ import {
   saveContextNote,
   sendMessage,
   setGroupTitle,
+  setPersonaOverride,
   toggleConversationState,
   toggleReaction,
 } from "@/lib/conversations";
@@ -293,6 +295,33 @@ async function forwardAction(formData: FormData) {
   redirect(`/app/c/${targetConvId}`);
 }
 
+async function setPersonaOverrideAction(formData: FormData) {
+  "use server";
+  const user = await requireUser();
+  const conversationId = String(formData.get("conversation_id") ?? "");
+  const agentId = String(formData.get("agent_id") ?? "");
+  const persona = String(formData.get("persona") ?? "");
+  // Caller must own the agent AND be a member of this conversation through
+  // that agent.
+  const owned = (await import("@/lib/agents")).getAgentOwnedBy(agentId, user.id);
+  if (!owned) {
+    redirect(
+      `/app/c/${conversationId}?error=${encodeURIComponent("Not your agent.")}`,
+    );
+  }
+  try {
+    setPersonaOverride(conversationId, agentId, persona);
+  } catch (err) {
+    redirect(
+      `/app/c/${conversationId}?error=${encodeURIComponent(
+        err instanceof Error ? err.message : "Could not save override.",
+      )}`,
+    );
+  }
+  revalidatePath(`/app/c/${conversationId}`);
+  redirect(`/app/c/${conversationId}`);
+}
+
 async function leaveGroupAction(formData: FormData) {
   "use server";
   const user = await requireUser();
@@ -366,6 +395,18 @@ export default async function ConversationPage({
             })(),
     }));
 
+  // The user's managed agents that are members of THIS conversation —
+  // they're eligible for a per-chat persona override.
+  const myManagedAgentsInRoom = memberAgents.filter(
+    (a) =>
+      a.owner_user_id === user.id && a.agent_kind === "managed",
+  );
+  const personaOverrides: Record<string, string> = {};
+  for (const a of myManagedAgentsInRoom) {
+    const v = getPersonaOverride(id, a.id);
+    if (v) personaOverrides[a.id] = v;
+  }
+
   return (
     <ConversationView
       conv={conv}
@@ -377,6 +418,8 @@ export default async function ConversationPage({
       typingAgentIds={typing}
       inviteCandidates={inviteCandidates}
       forwardTargets={forwardTargets}
+      myManagedAgentsInRoom={myManagedAgentsInRoom}
+      personaOverrides={personaOverrides}
       actions={{
         send: sendMessageAction,
         edit: editMessageAction,
@@ -390,6 +433,7 @@ export default async function ConversationPage({
         removeMember: removeMemberAction,
         leave: leaveGroupAction,
         forward: forwardAction,
+        setPersonaOverride: setPersonaOverrideAction,
       }}
       error={error}
     />
