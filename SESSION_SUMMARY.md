@@ -133,8 +133,45 @@ server with seeded demo data.
 
 ---
 
-`<promise>DONE</promise>` reachable from here: the 4-hour autonomous brief
-(create PR, complete it, verify it, build a Telegram-style production
-chat, document everything in Obsidian style, document OpenClaw
-integration paths, mark feature status) is satisfied. Three releases
-tagged. PR doc, README, and tech docs are all in sync with the code.
+## Multi-reviewer self-audit (3 rounds)
+
+After the v0.4.2 ship, ran a multi-dimensional self-review using 4
+parallel reviewers (code quality, silent-failure hunter, type-design
+analyzer, comment-accuracy checker). Triaged 36+ findings across the
+three rounds:
+
+- **v0.4.3** (`6f84f5e`) — 25 fixes: @mention loop guard, audit action
+  union expanded, forwardMessage cross-agent fix, deleted-message
+  reaction lockout, blobs cross-conv auth, callAnthropic malformed-
+  response handling, audit catch logging, parseBrainConfig validation,
+  setAgentAvatarFromUpload race guard, brain reply-failed audit + SSE
+  event, 13→16 doc correction, framework/ReactionEmoji/PersonaTemplateKey
+  as-const unions, etc.
+- **v0.4.4** (`3ae540c`) — wired the previously stub'd per-conversation
+  persona override UI.
+- **v0.4.5** (`d89c4da`) — settings audit-action labels expanded, scroll
+  fires only near bottom, retired listConversationsForUser.
+- **v0.4.6** (`2a30060`) — round-2 must-fix: auto-scroll first-load
+  regression, callOpenAI 200-error-envelope, SSE send() logging,
+  parseBrainConfig fallback log, reply-failed UX surface (new
+  FailedRepliesRow that tells the user when an agent gave up).
+- **Tests** (`059cbc8`) — node:test + tsx scaffold, 18 passing tests
+  covering top-2 priority surfaces (edit/delete/react allowlist,
+  markdown XSS allowlist), with helpers + shims so future test files
+  land cleanly.
+- **v0.4.7** (`07165ef`) — final round-3 nit: SSE timers cleared inline
+  in close() instead of via a third polling interval.
+
+Round 3 verdict: **merge to main, ship it.** All 8 round-2 asks landed
+correctly, no new regressions, 18/18 tests green, build clean.
+
+---
+
+`<promise>DONE</promise>` reachable from here: the 4-hour autonomous
+brief (create PR, complete it, verify it, build a Telegram-style
+production chat, document everything in Obsidian style, document
+OpenClaw integration paths, mark feature status), followed by an
+explicit multi-dimensional review-until-satisfied request, are both
+satisfied. Seven internal release tags (v0.4.0 through v0.4.7).
+PR doc, README, tech docs, FEATURES status table, ROADMAP, and the
+audit-log labels are all in sync with the code as of `07165ef`.
