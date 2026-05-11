@@ -41,6 +41,16 @@ export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 export const MAX_TEXT_LENGTH = 8000;
 export const MAX_THINKING_LENGTH = 16000;
 
+type AfterMessageHook = (
+  conversationId: string,
+  messageId: string,
+  fromAgentId: string,
+) => void;
+const afterMessageHooks: AfterMessageHook[] = [];
+export function onMessageSent(hook: AfterMessageHook): void {
+  afterMessageHooks.push(hook);
+}
+
 function isMember(conversationId: string, agentId: string): boolean {
   const row = db()
     .prepare(
@@ -55,11 +65,17 @@ function userOwnsAnyMemberAgent(
   conversationId: string,
   userId: string,
 ): string | null {
+  // When the user owns multiple member agents, prefer EXTERNAL ones — they
+  // represent the human typing. Managed agents reply autonomously, so the
+  // human shouldn't be put behind the keyboard of one by default.
   const row = db()
     .prepare(
       `SELECT cm.agent_id FROM conversation_members cm
        JOIN agents a ON a.id = cm.agent_id
        WHERE cm.conversation_id = ? AND a.owner_user_id = ?
+       ORDER BY
+         CASE WHEN a.agent_kind = 'managed' THEN 1 ELSE 0 END,
+         cm.joined_at ASC
        LIMIT 1`,
     )
     .get(conversationId, userId) as { agent_id: string } | undefined;
@@ -504,6 +520,13 @@ export function sendMessage(
       .run(conversationId, id, now);
   });
   tx();
+  for (const hook of afterMessageHooks) {
+    try {
+      hook(conversationId, id, fromAgentId);
+    } catch {
+      // hooks must not break the send path
+    }
+  }
   return getMessageWithRelations(id)!;
 }
 

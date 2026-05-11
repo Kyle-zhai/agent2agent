@@ -41,10 +41,10 @@ export default async function AppHome() {
 
       <section className="mt-12 grid grid-cols-1 md:grid-cols-2 gap-4">
         <QuickAction
-          href="/app/agents/new"
-          icon="🤖"
-          title="Create another agent"
-          body="Spawn a new agent identity (e.g. one for code, one for triage)."
+          href="/app/agents/connect"
+          icon="🦀"
+          title="Connect another agent"
+          body="Spin up a hosted persona (OpenClaw style). Or clone an existing managed agent for a different role."
         />
         <QuickAction
           href="/app/contacts"
@@ -72,16 +72,23 @@ export default async function AppHome() {
 function FirstAgentStep() {
   return (
     <div className="callout callout-blue">
-      <span className="text-2xl">🚀</span>
+      <span className="text-2xl">🦀</span>
       <div>
-        <div className="font-medium">Step 1 — create your first agent</div>
+        <div className="font-medium">Step 1 — connect an agent</div>
         <p className="text-sm text-[color:var(--color-ink-muted)] mt-1">
-          An agent is your <em>presence</em> on the network. Each one has a
-          global ID and a private API key your local agent uses to authenticate.
+          The fastest path: connect a hosted OpenClaw persona — like adding a
+          Telegram bot. It joins your account immediately and you can chat with
+          it right away. Or wire your local agent (Claude Code / Cursor) via
+          API key.
         </p>
-        <Link href="/app/agents/new" className="btn btn-primary mt-3">
-          Create an agent →
-        </Link>
+        <div className="flex gap-2 mt-3 flex-wrap">
+          <Link href="/app/agents/connect" className="btn btn-primary">
+            🦀 Connect OpenClaw
+          </Link>
+          <Link href="/app/agents/new" className="btn btn-secondary">
+            + External agent (API key)
+          </Link>
+        </div>
       </div>
     </div>
   );

@@ -18,7 +18,7 @@ export const SUPPORTED_FRAMEWORKS = [
 export type AgentFramework = (typeof SUPPORTED_FRAMEWORKS)[number];
 
 const AGENT_COLUMNS =
-  "id, owner_user_id, display_name, description, avatar_emoji, avatar_blob_path, api_key_prefix, framework, last_seen_at, last_message_at, created_at";
+  "id, owner_user_id, display_name, description, avatar_emoji, avatar_blob_path, api_key_prefix, framework, agent_kind, persona, brain_config_json, parent_agent_id, last_seen_at, last_message_at, created_at";
 
 export function listAgentsForUser(userId: string): Agent[] {
   return db()

@@ -12,7 +12,10 @@ import {
 } from "@/lib/conversations";
 import { consume, RATE_LIMITS, agentKey, rateLimitResponse } from "@/lib/rate-limit";
 import { logAudit, ipFromRequest, uaFromRequest } from "@/lib/audit";
+import { ensureManagedAgentHooks } from "@/lib/managed-agents-init";
 import type { MessageKind } from "@/lib/types";
+
+ensureManagedAgentHooks();
 
 export const dynamic = "force-dynamic";
 

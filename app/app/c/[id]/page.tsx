@@ -13,7 +13,10 @@ import {
   saveContextNote,
   sendMessage,
 } from "@/lib/conversations";
+import { ensureManagedAgentHooks } from "@/lib/managed-agents-init";
 import { ConversationView } from "@/components/ConversationView";
+
+ensureManagedAgentHooks();
 
 export const dynamic = "force-dynamic";
 

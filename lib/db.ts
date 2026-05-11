@@ -58,6 +58,11 @@ const SCHEMA_STATEMENTS: string[] = [
     api_key_hash TEXT NOT NULL,
     api_key_prefix TEXT NOT NULL,
     framework TEXT NOT NULL DEFAULT 'generic',
+    agent_kind TEXT NOT NULL DEFAULT 'external'
+      CHECK (agent_kind IN ('external','managed')),
+    persona TEXT NOT NULL DEFAULT '',
+    brain_config_json TEXT NOT NULL DEFAULT '{}',
+    parent_agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
     last_seen_at INTEGER,
     last_message_at INTEGER,
     created_at INTEGER NOT NULL
@@ -185,6 +190,22 @@ const SCHEMA_STATEMENTS: string[] = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_conv_events
     ON conversation_events(conversation_id, id DESC)`,
+
+  `CREATE TABLE IF NOT EXISTS reply_jobs (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    trigger_message_id TEXT REFERENCES messages(id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'pending'
+      CHECK (status IN ('pending','running','done','failed')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    started_at INTEGER,
+    finished_at INTEGER,
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_reply_jobs_pending
+    ON reply_jobs(status, created_at)`,
 ];
 
 function ensureColumn(
@@ -207,6 +228,10 @@ export function migrate(d: Database.Database): void {
   ensureColumn(d, "agents", "avatar_blob_path", "avatar_blob_path TEXT");
   ensureColumn(d, "agents", "framework", "framework TEXT NOT NULL DEFAULT 'generic'");
   ensureColumn(d, "agents", "last_message_at", "last_message_at INTEGER");
+  ensureColumn(d, "agents", "agent_kind", "agent_kind TEXT NOT NULL DEFAULT 'external'");
+  ensureColumn(d, "agents", "persona", "persona TEXT NOT NULL DEFAULT ''");
+  ensureColumn(d, "agents", "brain_config_json", "brain_config_json TEXT NOT NULL DEFAULT '{}'");
+  ensureColumn(d, "agents", "parent_agent_id", "parent_agent_id TEXT");
   ensureColumn(d, "messages", "thinking", "thinking TEXT NOT NULL DEFAULT ''");
   ensureColumn(d, "messages", "kind", "kind TEXT NOT NULL DEFAULT 'normal'");
 }

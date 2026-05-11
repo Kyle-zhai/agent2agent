@@ -5,12 +5,16 @@ import { requireUser } from "@/lib/auth";
 import {
   deleteAgentForUser,
   getAgentOwnedBy,
+  listAgentsForUser,
   rotateApiKey,
 } from "@/lib/agents";
 import { setAgentAvatarFromUpload, clearAgentAvatar } from "@/lib/avatars";
 import { listFriendsOfAgent } from "@/lib/friends";
 import { CopyButton } from "@/components/CopyButton";
 import { popSecret, stashSecret } from "@/lib/ephemeral";
+import { cloneManagedAgent } from "@/lib/managed-agents";
+import { createDirectConversation } from "@/lib/conversations";
+import { parseBrainConfig } from "@/lib/brains";
 
 export const dynamic = "force-dynamic";
 
@@ -80,6 +84,51 @@ async function clearAvatarAction(formData: FormData) {
   redirect(`/app/agents/${encodeURIComponent(id)}?ok=Avatar+cleared`);
 }
 
+async function cloneAgentAction(formData: FormData) {
+  "use server";
+  const user = await requireUser();
+  const parentId = String(formData.get("parent_id") ?? "");
+  const handle = String(formData.get("handle") ?? "");
+  const display_name = String(formData.get("display_name") ?? "");
+  const persona = String(formData.get("persona") ?? "");
+  let cloned;
+  try {
+    cloned = cloneManagedAgent(user.id, parentId, handle, display_name, {
+      persona: persona || undefined,
+    });
+  } catch (err) {
+    redirect(
+      `/app/agents/${encodeURIComponent(parentId)}?err=${encodeURIComponent(
+        err instanceof Error ? err.message : "Clone failed.",
+      )}`,
+    );
+  }
+  revalidatePath("/app", "layout");
+  redirect(
+    `/app/agents/${encodeURIComponent(cloned.id)}?ok=Clone+created`,
+  );
+}
+
+async function startChatAction(formData: FormData) {
+  "use server";
+  const user = await requireUser();
+  const myAgentId = String(formData.get("my_agent_id") ?? "");
+  const targetId = String(formData.get("target_id") ?? "");
+  let convId: string;
+  try {
+    const conv = createDirectConversation(user.id, myAgentId, targetId);
+    convId = conv.id;
+  } catch (err) {
+    redirect(
+      `/app/agents/${encodeURIComponent(targetId)}?err=${encodeURIComponent(
+        err instanceof Error ? err.message : "Could not open chat.",
+      )}`,
+    );
+  }
+  revalidatePath("/app", "layout");
+  redirect(`/app/c/${convId}`);
+}
+
 export default async function AgentDetailPage({
   params,
   searchParams,
@@ -94,6 +143,10 @@ export default async function AgentDetailPage({
   const agent = getAgentOwnedBy(decodedId, user.id);
   if (!agent) notFound();
   const friends = listFriendsOfAgent(agent.id);
+  const brain = parseBrainConfig(agent.brain_config_json);
+  const myOtherAgents = listAgentsForUser(user.id).filter(
+    (a) => a.id !== agent.id,
+  );
 
   const revealedKey =
     reveal === "1" ? popSecret(`apikey:${user.id}:${agent.id}`) : null;
@@ -115,14 +168,25 @@ export default async function AgentDetailPage({
           <div className="mt-1 flex items-center gap-2 flex-wrap">
             <code className="kbd">{agent.id}</code>
             <CopyButton value={agent.id} label="Copy ID" />
-            {agent.framework !== "generic" ? (
+            {agent.agent_kind === "managed" ? (
+              <span className="tag tag-violet">
+                🦀 managed · {agent.framework}
+              </span>
+            ) : agent.framework !== "generic" ? (
               <span className="tag tag-violet">{agent.framework}</span>
             ) : null}
             {agent.last_seen_at ? (
               <span className="tag tag-green">online</span>
+            ) : agent.agent_kind === "managed" ? (
+              <span className="tag tag-green">always-on</span>
             ) : (
               <span className="tag">never connected</span>
             )}
+            {agent.parent_agent_id ? (
+              <span className="tag tag-blue">
+                clone of <code className="font-mono">{agent.parent_agent_id}</code>
+              </span>
+            ) : null}
           </div>
           {agent.description ? (
             <p className="mt-2 text-[color:var(--color-ink-muted)]">
@@ -146,6 +210,122 @@ export default async function AgentDetailPage({
       ) : null}
 
       <RevealedKey agent={agent} revealed={revealedKey} />
+
+      {agent.agent_kind === "managed" ? (
+        <section className="mt-10">
+          <h2 className="text-lg font-semibold">Brain</h2>
+          <div className="mt-3 surface p-5 space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+              <div>
+                <div className="text-[11px] uppercase tracking-wider text-[color:var(--color-ink-soft)]">
+                  Provider
+                </div>
+                <code className="kbd">{brain.provider}</code>
+              </div>
+              <div>
+                <div className="text-[11px] uppercase tracking-wider text-[color:var(--color-ink-soft)]">
+                  Model
+                </div>
+                <code className="kbd">{brain.model ?? "(default)"}</code>
+              </div>
+              <div>
+                <div className="text-[11px] uppercase tracking-wider text-[color:var(--color-ink-soft)]">
+                  Temperature
+                </div>
+                <code className="kbd">{brain.temperature ?? 0.7}</code>
+              </div>
+            </div>
+            {agent.persona ? (
+              <details>
+                <summary className="text-sm font-medium cursor-pointer">
+                  Persona / system prompt
+                </summary>
+                <pre className="mt-2 text-[12.5px] leading-[1.55] whitespace-pre-wrap font-mono text-[color:var(--color-ink-muted)] bg-[color:var(--color-canvas)] p-3 rounded">
+                  {agent.persona}
+                </pre>
+              </details>
+            ) : null}
+            {brain.provider === "mock" ? (
+              <p className="text-[12px] text-[color:var(--color-ink-soft)]">
+                ℹ️ Mock brain returns deterministic replies useful for demoing
+                the UX. Set <code className="kbd">ANTHROPIC_API_KEY</code> in
+                your env and re-spawn (or rotate) to switch to live LLM
+                responses.
+              </p>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
+
+      {agent.agent_kind === "managed" && myOtherAgents.length > 0 ? (
+        <section className="mt-10">
+          <h2 className="text-lg font-semibold">Open a chat</h2>
+          <p className="text-sm text-[color:var(--color-ink-muted)] mt-1">
+            Pick which of your agents speaks first. The managed agent answers automatically.
+          </p>
+          <form action={startChatAction} className="mt-3 flex items-center gap-2 flex-wrap">
+            <input type="hidden" name="target_id" value={agent.id} />
+            <select name="my_agent_id" className="input !w-auto">
+              {myOtherAgents.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.avatar_emoji} {a.id} ({a.agent_kind})
+                </option>
+              ))}
+            </select>
+            <button type="submit" className="btn btn-primary">
+              Open chat →
+            </button>
+          </form>
+        </section>
+      ) : null}
+
+      {agent.agent_kind === "managed" ? (
+        <section className="mt-10">
+          <h2 className="text-lg font-semibold">Spawn a clone</h2>
+          <p className="text-sm text-[color:var(--color-ink-muted)] mt-1">
+            Same brain + persona, different name + ID. Useful for running
+            multiple specialized variants.
+          </p>
+          <form action={cloneAgentAction} className="mt-3 surface p-4 space-y-3">
+            <input type="hidden" name="parent_id" value={agent.id} />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label>
+                <span className="label">Clone handle</span>
+                <input
+                  className="input"
+                  name="handle"
+                  required
+                  minLength={2}
+                  maxLength={30}
+                  pattern="^[a-z][a-z0-9-]{1,29}$"
+                  placeholder={`${agent.id.split(".")[0]}-2`}
+                />
+              </label>
+              <label>
+                <span className="label">Clone display name</span>
+                <input
+                  className="input"
+                  name="display_name"
+                  required
+                  maxLength={60}
+                  defaultValue={`${agent.display_name} (clone)`}
+                />
+              </label>
+            </div>
+            <label>
+              <span className="label">Override persona (optional)</span>
+              <textarea
+                name="persona"
+                className="input min-h-[80px] font-mono text-[12.5px]"
+                placeholder="Leave blank to copy parent persona verbatim."
+              />
+            </label>
+            <button type="submit" className="btn btn-primary">
+              Clone
+            </button>
+          </form>
+        </section>
+      ) : null}
 
       <section className="mt-10">
         <h2 className="text-lg font-semibold">Avatar</h2>

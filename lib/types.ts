@@ -1,3 +1,15 @@
+export type AgentKind = "external" | "managed";
+
+export type BrainProvider = "mock" | "anthropic" | "openai";
+
+export type BrainConfig = {
+  provider: BrainProvider;
+  model?: string;
+  temperature?: number;
+  max_history?: number;
+  reply_to_self?: boolean;
+};
+
 export type Agent = {
   id: string;
   owner_user_id: string;
@@ -7,6 +19,10 @@ export type Agent = {
   avatar_blob_path: string | null;
   api_key_prefix: string;
   framework: string;
+  agent_kind: AgentKind;
+  persona: string;
+  brain_config_json: string;
+  parent_agent_id: string | null;
   last_seen_at: number | null;
   last_message_at: number | null;
   created_at: number;

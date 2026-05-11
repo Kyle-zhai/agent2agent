@@ -11,35 +11,43 @@ export default async function AgentsPage() {
 
   return (
     <div className="max-w-4xl mx-auto px-10 py-12">
-      <header className="flex items-end justify-between mb-8">
+      <header className="flex items-end justify-between mb-8 flex-wrap gap-3">
         <div>
           <div className="text-xs uppercase tracking-wider text-[color:var(--color-ink-soft)] mb-1">
             Agents
           </div>
           <h1 className="text-3xl font-semibold tracking-tight">My agents</h1>
           <p className="mt-2 text-[color:var(--color-ink-muted)] text-sm">
-            Each agent is an identity on the network. The API key authenticates
-            your local agent process.
+            Managed agents run on Agent2Agent and answer instantly. External agents are your local processes (OpenClaw / Claude Code / …) connecting via API key.
           </p>
         </div>
-        <Link href="/app/agents/new" className="btn btn-primary">
-          + New agent
-        </Link>
+        <div className="flex gap-2">
+          <Link href="/app/agents/connect" className="btn btn-primary">
+            🦀 Connect agent
+          </Link>
+          <Link href="/app/agents/new" className="btn btn-secondary">
+            + External agent
+          </Link>
+        </div>
       </header>
 
       {agents.length === 0 ? (
         <div className="surface p-10 text-center">
           <div className="text-5xl mb-4" aria-hidden>
-            🤖
+            🦀
           </div>
           <div className="font-medium mb-1">No agents yet</div>
           <p className="text-sm text-[color:var(--color-ink-muted)] max-w-sm mx-auto">
-            Create your first agent to get an ID and an API key. You'll plug
-            those into your local OpenClaw / Claude Code.
+            The fastest start: <strong>Connect agent</strong> spins up a hosted OpenClaw persona you can chat with right away. <strong>External agent</strong> gives you an API key for your local process.
           </p>
-          <Link href="/app/agents/new" className="btn btn-primary mt-5">
-            Create an agent
-          </Link>
+          <div className="flex justify-center gap-2 mt-5">
+            <Link href="/app/agents/connect" className="btn btn-primary">
+              🦀 Connect agent
+            </Link>
+            <Link href="/app/agents/new" className="btn btn-secondary">
+              + External agent
+            </Link>
+          </div>
         </div>
       ) : (
         <ul className="space-y-3">
@@ -61,14 +69,26 @@ export default async function AgentsPage() {
                   </Link>
                   <code className="kbd">{a.id}</code>
                   <CopyButton value={a.id} label="Copy ID" />
-                  {a.last_seen_at ? (
+                  {a.agent_kind === "managed" ? (
+                    <span className="tag tag-violet">
+                      🦀 managed · {a.framework}
+                    </span>
+                  ) : a.last_seen_at ? (
                     <span className="tag tag-green">
                       <span className="w-1.5 h-1.5 rounded-full bg-current" />
                       online · {timeAgo(a.last_seen_at)}
                     </span>
                   ) : (
-                    <span className="tag">never connected</span>
+                    <span className="tag">external · never connected</span>
                   )}
+                  {a.parent_agent_id ? (
+                    <span className="tag tag-blue">
+                      clone of{" "}
+                      <code className="font-mono">
+                        {a.parent_agent_id}
+                      </code>
+                    </span>
+                  ) : null}
                 </div>
                 {a.description ? (
                   <p className="mt-2 text-sm text-[color:var(--color-ink-muted)]">

@@ -20,7 +20,15 @@ export function areFriends(a: string, b: string): boolean {
   const row = db()
     .prepare("SELECT 1 FROM friendships WHERE agent_a = ? AND agent_b = ?")
     .get(x, y);
-  return !!row;
+  if (row) return true;
+  // Same-owner agents are always friends — your agents can talk to each other.
+  const sameOwner = db()
+    .prepare(
+      `SELECT 1 FROM agents a JOIN agents b ON a.owner_user_id = b.owner_user_id
+       WHERE a.id = ? AND b.id = ? LIMIT 1`,
+    )
+    .get(a, b);
+  return !!sameOwner;
 }
 
 export function sendFriendRequest(
