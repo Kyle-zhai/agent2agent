@@ -89,79 +89,10 @@ function userOwnsAnyMemberAgent(
   return row?.agent_id ?? null;
 }
 
-export function listConversationsForUser(userId: string): Array<
-  Conversation & {
-    member_agent_ids: string[];
-    last_message: Message | null;
-    unread_count: number;
-    my_agent_id: string;
-  }
-> {
-  const convs = db()
-    .prepare(
-      `SELECT DISTINCT c.* FROM conversations c
-       JOIN conversation_members cm ON cm.conversation_id = c.id
-       JOIN agents a ON a.id = cm.agent_id
-       WHERE a.owner_user_id = ?
-       ORDER BY c.created_at DESC`,
-    )
-    .all(userId) as Conversation[];
-  return convs.map((c) => {
-    const members = db()
-      .prepare(
-        `SELECT agent_id FROM conversation_members WHERE conversation_id = ?`,
-      )
-      .all(c.id) as { agent_id: string }[];
-    const memberIds = members.map((m) => m.agent_id);
-    const myAgentRow = db()
-      .prepare(
-        `SELECT cm.agent_id FROM conversation_members cm
-         JOIN agents a ON a.id = cm.agent_id
-         WHERE cm.conversation_id = ? AND a.owner_user_id = ?
-         ORDER BY cm.joined_at ASC LIMIT 1`,
-      )
-      .get(c.id, userId) as { agent_id: string };
-    const last = db()
-      .prepare(
-        `SELECT * FROM messages WHERE conversation_id = ?
-         ORDER BY created_at DESC LIMIT 1`,
-      )
-      .get(c.id) as Message | undefined;
-    const lastReadRow = db()
-      .prepare(
-        `SELECT last_read_message_id FROM conversation_members
-         WHERE conversation_id = ? AND agent_id = ?`,
-      )
-      .get(c.id, myAgentRow.agent_id) as
-      | { last_read_message_id: string | null }
-      | undefined;
-    let unread = 0;
-    if (last && last.id !== lastReadRow?.last_read_message_id) {
-      const lastReadCreated = lastReadRow?.last_read_message_id
-        ? (db()
-            .prepare("SELECT created_at FROM messages WHERE id = ?")
-            .get(lastReadRow.last_read_message_id) as
-            | { created_at: number }
-            | undefined)?.created_at ?? 0
-        : 0;
-      const u = db()
-        .prepare(
-          `SELECT COUNT(*) AS n FROM messages
-           WHERE conversation_id = ? AND created_at > ?
-             AND from_agent_id != ?`,
-        )
-        .get(c.id, lastReadCreated, myAgentRow.agent_id) as { n: number };
-      unread = u.n;
-    }
-    return {
-      ...c,
-      member_agent_ids: memberIds,
-      last_message: last ?? null,
-      unread_count: unread,
-      my_agent_id: myAgentRow.agent_id,
-    };
-  });
-}
+// listConversationsForUser was retired in v0.4.3 — it used joined_at-only
+// ordering to pick "my agent" while listConversationsWithState prefers
+// external-first, leading to inconsistent unread cursors. Use
+// listConversationsWithState exclusively.
 
 export function createDirectConversation(
   userId: string,

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { listAgentsForUser } from "@/lib/agents";
-import { listConversationsForUser } from "@/lib/conversations";
+import { listConversationsWithState } from "@/lib/conversations";
 import { listIncomingRequests } from "@/lib/friends";
 
 export const dynamic = "force-dynamic";
@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export default async function AppHome() {
   const user = await requireUser();
   const agents = listAgentsForUser(user.id);
-  const conversations = listConversationsForUser(user.id);
+  const conversations = listConversationsWithState(user.id);
   const incoming = listIncomingRequests(user.id);
 
   const stage = (() => {

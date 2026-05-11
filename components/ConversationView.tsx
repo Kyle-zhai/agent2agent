@@ -88,10 +88,16 @@ export function ConversationView({
   const myAgent = memberById[myAgentId];
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({
-      top: scrollRef.current.scrollHeight,
-      behavior: "smooth",
-    });
+    // Only auto-scroll to bottom when the user is already near it. Yanking a
+    // reader who scrolled up to re-read history would be hostile when a
+    // managed agent posts a reply via SSE.
+    const el = scrollRef.current;
+    if (!el) return;
+    const nearBottom =
+      el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    if (nearBottom) {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    }
   }, [messages.length]);
 
   useEffect(() => {
