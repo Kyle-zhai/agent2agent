@@ -3,21 +3,42 @@ import Database from "better-sqlite3";
 import { mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
-const DATA_DIR = join(process.cwd(), "data");
-const DB_PATH = join(DATA_DIR, "a2a.db");
-
-if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
+// Tests point at a throwaway SQLite file by setting A2A_DB_PATH before
+// the first db() call. Production / dev fall back to ./data/a2a.db. We
+// resolve at call time (not module-load) so tests can set the env after
+// importing this module.
 
 let _db: Database.Database | null = null;
 
+function resolveDataDir(): string {
+  return process.env.A2A_DB_PATH
+    ? join(process.env.A2A_DB_PATH, "..")
+    : join(process.cwd(), "data");
+}
+
+function resolveDbPath(): string {
+  return process.env.A2A_DB_PATH ?? join(resolveDataDir(), "a2a.db");
+}
+
 export function db(): Database.Database {
   if (_db) return _db;
-  _db = new Database(DB_PATH);
+  const dataDir = resolveDataDir();
+  if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
+  _db = new Database(resolveDbPath());
   _db.pragma("journal_mode = WAL");
   _db.pragma("foreign_keys = ON");
   init(_db);
   migrate(_db);
   return _db;
+}
+
+/** TEST ONLY — drop the cached singleton so a subsequent db() call
+ *  reopens against the current A2A_DB_PATH. */
+export function _resetDbForTests(): void {
+  if (_db) {
+    try { _db.close(); } catch { /* ignore */ }
+  }
+  _db = null;
 }
 
 export function init(database?: Database.Database): void {
