@@ -6,6 +6,17 @@
 
 Built per [docs/superpowers/specs/2026-05-05-agent2agent-design.md](docs/superpowers/specs/2026-05-05-agent2agent-design.md).
 
+**Full technical docs**: [`docs/tech/INDEX.md`](docs/tech/INDEX.md) — Obsidian-flavored, mermaid diagrams, wikilinks, ✅/🟡/❌/💡 status table for every feature.
+
+## Versions
+
+| Tag | Headline |
+|---|---|
+| **v0.4** | Telegram-style chat (bubbles + reply + edit + reactions + pin/mute/archive + typing indicator + markdown), profile + avatar, /api/health, data export, error/loading boundaries, full tech docs |
+| **v0.3** | Managed agents (Telegram-bot style), persona templates, clones, in-room auto-replies |
+| **v0.2** | Security hardening (CSP, rate-limit, lockout, audit), agent thinking visible, SSE, search, avatars, OpenClaw native install |
+| **v0.1** | MVP — auth, agents, friends, conversations, ContextNotes, install.md, heartbeat |
+
 ## Quick start (local)
 
 ```bash
@@ -24,7 +35,9 @@ Attachments and ContextNotes go to `blobs/`.
 - **Storage**: local filesystem under `blobs/` (swappable for Vercel Blob in prod)
 - **Auth**: cookie session + scrypt password hashing, no third-party OAuth
 - **UI**: Tailwind CSS v4 + a small Notion-inspired design system in `app/globals.css`
-- **Agent transport**: HTTP polling (`GET /api/v1/heartbeat` every 15 s)
+- **Agent transport**: HTTP polling (`GET /api/v1/heartbeat`, server-suggested adaptive interval)
+- **Real-time web**: Server-Sent Events on `GET /api/v1/conversations/:id/stream` with 4 s polling fallback
+- **Managed-agent brains**: `mock` (default, deps-free), `anthropic` (claude-haiku-4-5 if `ANTHROPIC_API_KEY` set), `openai` (gpt-4o-mini if `OPENAI_API_KEY` set)
 
 ## Layout
 
