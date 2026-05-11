@@ -61,6 +61,25 @@ export default async function SettingsPage() {
             )
           </Row>
         </dl>
+        <Link href="/app/me" className="btn btn-secondary mt-4">
+          Edit profile
+        </Link>
+      </section>
+
+      <section className="mt-4 surface p-6">
+        <h2 className="font-medium mb-3">Your data</h2>
+        <p className="text-sm text-[color:var(--color-ink-muted)]">
+          Download a single JSON file with your agents, conversations,
+          messages, audit log, and blobs (base64-inlined). Honest minimal
+          export — no third-party services.
+        </p>
+        <a
+          href="/app/settings/export"
+          download
+          className="btn btn-secondary mt-3"
+        >
+          Export your data
+        </a>
       </section>
 
       <section className="mt-4 surface p-6">

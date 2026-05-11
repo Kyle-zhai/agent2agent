@@ -17,9 +17,12 @@ import type {
   ContextNote,
   Conversation,
   ConversationMember,
+  ConversationState,
   Message,
   MessageKind,
+  MessageReaction,
   MessageWithRelations,
+  ReactionAggregate,
 } from "./types";
 
 export type {
@@ -27,9 +30,12 @@ export type {
   ContextNote,
   Conversation,
   ConversationMember,
+  ConversationState,
   Message,
   MessageKind,
+  MessageReaction,
   MessageWithRelations,
+  ReactionAggregate,
 } from "./types";
 
 const BLOB_DIR = join(process.cwd(), "blobs");
@@ -426,12 +432,15 @@ export function getContextNote(id: string): ContextNote | null {
   );
 }
 
+export const EDIT_DELETE_WINDOW_MS = 5 * 60 * 1000;
+
 export type SendMessageInput = {
   text?: string;
   thinking?: string;
   kind?: MessageKind;
   attachment_ids?: string[];
   context_note_id?: string | null;
+  reply_to_message_id?: string | null;
 };
 
 export function sendMessage(
@@ -455,6 +464,7 @@ export function sendMessage(
     );
   }
   const contextNoteId = input.context_note_id ?? null;
+  const replyToId = input.reply_to_message_id ?? null;
   if (!text && !thinking && attachmentIds.length === 0 && !contextNoteId) {
     throw new Error("Message must have text, thinking, attachments, or a context note.");
   }
@@ -464,6 +474,14 @@ export function sendMessage(
   if (contextNoteId && !getContextNote(contextNoteId)) {
     throw new Error("Context note not found.");
   }
+  if (replyToId) {
+    const parent = db()
+      .prepare("SELECT id, conversation_id FROM messages WHERE id = ?")
+      .get(replyToId) as { id: string; conversation_id: string } | undefined;
+    if (!parent || parent.conversation_id !== conversationId) {
+      throw new Error("reply_to_message_id must be a message in the same conversation.");
+    }
+  }
   const id = newMessageId();
   const now = Date.now();
   const tx = db().transaction(() => {
@@ -471,10 +489,13 @@ export function sendMessage(
       .prepare(
         `INSERT INTO messages
          (id, conversation_id, from_agent_id, text, thinking, kind,
-          context_note_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          context_note_id, reply_to_message_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(id, conversationId, fromAgentId, text, thinking, kind, contextNoteId, now);
+      .run(
+        id, conversationId, fromAgentId, text, thinking, kind,
+        contextNoteId, replyToId, now,
+      );
     db()
       .prepare(
         `INSERT INTO messages_fts (message_id, conversation_id, text, thinking)
@@ -574,6 +595,309 @@ export function getMessageWithRelations(
     .all(id) as Attachment[];
   const cn = m.context_note_id ? getContextNote(m.context_note_id) : null;
   return { ...m, attachments: atts, context_note: cn };
+}
+
+export function editMessage(
+  messageId: string,
+  fromAgentId: string,
+  newText: string,
+): Message {
+  const m = db()
+    .prepare("SELECT * FROM messages WHERE id = ?")
+    .get(messageId) as Message | undefined;
+  if (!m) throw new Error("Message not found.");
+  if (m.from_agent_id !== fromAgentId) {
+    throw new Error("Can only edit your own messages.");
+  }
+  if (m.deleted_at) throw new Error("Cannot edit a deleted message.");
+  if (Date.now() - m.created_at > EDIT_DELETE_WINDOW_MS) {
+    throw new Error("Edit window has passed (5 minutes).");
+  }
+  const text = newText.trim().slice(0, MAX_TEXT_LENGTH);
+  const now = Date.now();
+  db()
+    .prepare("UPDATE messages SET text = ?, edited_at = ? WHERE id = ?")
+    .run(text, now, messageId);
+  // Update FTS row.
+  db()
+    .prepare(
+      `DELETE FROM messages_fts WHERE message_id = ?`,
+    )
+    .run(messageId);
+  db()
+    .prepare(
+      `INSERT INTO messages_fts (message_id, conversation_id, text, thinking)
+       VALUES (?, ?, ?, ?)`,
+    )
+    .run(messageId, m.conversation_id, text, m.thinking);
+  // Conversation event so SSE clients pick it up.
+  db()
+    .prepare(
+      `INSERT INTO conversation_events (conversation_id, kind, message_id, created_at)
+       VALUES (?, 'edit', ?, ?)`,
+    )
+    .run(m.conversation_id, messageId, now);
+  return { ...m, text, edited_at: now };
+}
+
+export function deleteMessage(
+  messageId: string,
+  fromAgentId: string,
+): Message {
+  const m = db()
+    .prepare("SELECT * FROM messages WHERE id = ?")
+    .get(messageId) as Message | undefined;
+  if (!m) throw new Error("Message not found.");
+  if (m.from_agent_id !== fromAgentId) {
+    throw new Error("Can only delete your own messages.");
+  }
+  if (m.deleted_at) return m;
+  if (Date.now() - m.created_at > EDIT_DELETE_WINDOW_MS) {
+    throw new Error("Delete window has passed (5 minutes).");
+  }
+  const now = Date.now();
+  db()
+    .prepare(
+      `UPDATE messages SET deleted_at = ?, text = '', thinking = '' WHERE id = ?`,
+    )
+    .run(now, messageId);
+  db().prepare(`DELETE FROM messages_fts WHERE message_id = ?`).run(messageId);
+  db()
+    .prepare(
+      `INSERT INTO conversation_events (conversation_id, kind, message_id, created_at)
+       VALUES (?, 'delete', ?, ?)`,
+    )
+    .run(m.conversation_id, messageId, now);
+  return { ...m, text: "", thinking: "", deleted_at: now };
+}
+
+export function listReactions(messageIds: string[]): Map<string, ReactionAggregate[]> {
+  if (messageIds.length === 0) return new Map();
+  const placeholders = messageIds.map(() => "?").join(",");
+  const rows = db()
+    .prepare(
+      `SELECT message_id, agent_id, emoji, created_at FROM message_reactions
+       WHERE message_id IN (${placeholders})
+       ORDER BY created_at ASC`,
+    )
+    .all(...messageIds) as MessageReaction[];
+  const out = new Map<string, ReactionAggregate[]>();
+  for (const r of rows) {
+    let agg = out.get(r.message_id);
+    if (!agg) {
+      agg = [];
+      out.set(r.message_id, agg);
+    }
+    let row = agg.find((x) => x.emoji === r.emoji);
+    if (!row) {
+      row = { emoji: r.emoji, count: 0, agent_ids: [] };
+      agg.push(row);
+    }
+    row.count++;
+    row.agent_ids.push(r.agent_id);
+  }
+  return out;
+}
+
+const ALLOWED_REACTIONS = new Set([
+  "👍", "👎", "❤️", "😂", "😮", "😢", "🎉", "🚀", "✅", "❌", "🤔", "🔥",
+]);
+
+export function toggleReaction(
+  messageId: string,
+  agentId: string,
+  emoji: string,
+): { added: boolean } {
+  if (!ALLOWED_REACTIONS.has(emoji)) {
+    throw new Error("Reaction emoji not allowed.");
+  }
+  const m = db()
+    .prepare("SELECT conversation_id FROM messages WHERE id = ?")
+    .get(messageId) as { conversation_id: string } | undefined;
+  if (!m) throw new Error("Message not found.");
+  if (!isMember(m.conversation_id, agentId)) {
+    throw new Error("Not a member of that conversation.");
+  }
+  const existing = db()
+    .prepare(
+      `SELECT 1 FROM message_reactions
+       WHERE message_id = ? AND agent_id = ? AND emoji = ?`,
+    )
+    .get(messageId, agentId, emoji);
+  const now = Date.now();
+  if (existing) {
+    db()
+      .prepare(
+        `DELETE FROM message_reactions
+         WHERE message_id = ? AND agent_id = ? AND emoji = ?`,
+      )
+      .run(messageId, agentId, emoji);
+  } else {
+    db()
+      .prepare(
+        `INSERT INTO message_reactions (message_id, agent_id, emoji, created_at)
+         VALUES (?, ?, ?, ?)`,
+      )
+      .run(messageId, agentId, emoji, now);
+  }
+  db()
+    .prepare(
+      `INSERT INTO conversation_events (conversation_id, kind, message_id, created_at)
+       VALUES (?, 'reaction', ?, ?)`,
+    )
+    .run(m.conversation_id, messageId, now);
+  return { added: !existing };
+}
+
+export function getConversationState(
+  conversationId: string,
+  agentId: string,
+): ConversationState {
+  const row = db()
+    .prepare(
+      `SELECT conversation_id, agent_id, pinned_at, muted_at, archived_at
+       FROM conversation_state WHERE conversation_id = ? AND agent_id = ?`,
+    )
+    .get(conversationId, agentId) as ConversationState | undefined;
+  return (
+    row ?? {
+      conversation_id: conversationId,
+      agent_id: agentId,
+      pinned_at: null,
+      muted_at: null,
+      archived_at: null,
+    }
+  );
+}
+
+export type ConversationStateField = "pinned_at" | "muted_at" | "archived_at";
+
+export function toggleConversationState(
+  conversationId: string,
+  agentId: string,
+  field: ConversationStateField,
+): { value: number | null } {
+  if (!isMember(conversationId, agentId)) {
+    throw new Error("Not a member of that conversation.");
+  }
+  const cur = getConversationState(conversationId, agentId);
+  const now = Date.now();
+  const next = cur[field] ? null : now;
+  db()
+    .prepare(
+      `INSERT INTO conversation_state (conversation_id, agent_id, ${field})
+       VALUES (?, ?, ?)
+       ON CONFLICT(conversation_id, agent_id) DO UPDATE SET ${field} = excluded.${field}`,
+    )
+    .run(conversationId, agentId, next);
+  return { value: next };
+}
+
+export function setGroupTitle(
+  conversationId: string,
+  byAgentId: string,
+  title: string,
+): void {
+  const conv = getConversation(conversationId);
+  if (!conv) throw new Error("Conversation not found.");
+  if (conv.type !== "group") throw new Error("Only group titles can be edited.");
+  if (conv.created_by_agent_id !== byAgentId) {
+    throw new Error("Only the creator can rename the group.");
+  }
+  const t = title.trim().slice(0, 80);
+  if (t.length < 1) throw new Error("Title cannot be empty.");
+  db().prepare("UPDATE conversations SET title = ? WHERE id = ?").run(t, conversationId);
+  db()
+    .prepare(
+      `INSERT INTO conversation_events (conversation_id, kind, created_at)
+       VALUES (?, 'title', ?)`,
+    )
+    .run(conversationId, Date.now());
+}
+
+export function listConversationsWithState(userId: string): Array<{
+  conversation: Conversation;
+  member_agent_ids: string[];
+  my_agent_id: string;
+  state: ConversationState;
+  last_message: Message | null;
+  unread_count: number;
+}> {
+  const convs = db()
+    .prepare(
+      `SELECT DISTINCT c.* FROM conversations c
+       JOIN conversation_members cm ON cm.conversation_id = c.id
+       JOIN agents a ON a.id = cm.agent_id
+       WHERE a.owner_user_id = ?`,
+    )
+    .all(userId) as Conversation[];
+  return convs.map((c) => {
+    const memberRows = db()
+      .prepare("SELECT agent_id FROM conversation_members WHERE conversation_id = ?")
+      .all(c.id) as { agent_id: string }[];
+    const myAgentRow = db()
+      .prepare(
+        `SELECT cm.agent_id FROM conversation_members cm
+         JOIN agents a ON a.id = cm.agent_id
+         WHERE cm.conversation_id = ? AND a.owner_user_id = ?
+         ORDER BY
+           CASE WHEN a.agent_kind = 'managed' THEN 1 ELSE 0 END,
+           cm.joined_at ASC LIMIT 1`,
+      )
+      .get(c.id, userId) as { agent_id: string };
+    const state = getConversationState(c.id, myAgentRow.agent_id);
+    const last = db()
+      .prepare(
+        `SELECT * FROM messages WHERE conversation_id = ? AND deleted_at IS NULL
+         ORDER BY created_at DESC LIMIT 1`,
+      )
+      .get(c.id) as Message | undefined;
+    const lastReadRow = db()
+      .prepare(
+        `SELECT last_read_message_id FROM conversation_members
+         WHERE conversation_id = ? AND agent_id = ?`,
+      )
+      .get(c.id, myAgentRow.agent_id) as
+      | { last_read_message_id: string | null }
+      | undefined;
+    let unread = 0;
+    if (last && last.id !== lastReadRow?.last_read_message_id) {
+      const lastReadCreated = lastReadRow?.last_read_message_id
+        ? (db()
+            .prepare("SELECT created_at FROM messages WHERE id = ?")
+            .get(lastReadRow.last_read_message_id) as
+            | { created_at: number }
+            | undefined)?.created_at ?? 0
+        : 0;
+      const u = db()
+        .prepare(
+          `SELECT COUNT(*) AS n FROM messages
+           WHERE conversation_id = ? AND created_at > ?
+             AND from_agent_id != ?`,
+        )
+        .get(c.id, lastReadCreated, myAgentRow.agent_id) as { n: number };
+      unread = u.n;
+    }
+    return {
+      conversation: c,
+      member_agent_ids: memberRows.map((r) => r.agent_id),
+      my_agent_id: myAgentRow.agent_id,
+      state,
+      last_message: last ?? null,
+      unread_count: unread,
+    };
+  });
+}
+
+export function listRunningReplyJobsForConversation(
+  conversationId: string,
+): Array<{ agent_id: string; started_at: number | null }> {
+  return db()
+    .prepare(
+      `SELECT agent_id, started_at FROM reply_jobs
+       WHERE conversation_id = ? AND status IN ('pending','running')`,
+    )
+    .all(conversationId) as Array<{ agent_id: string; started_at: number | null }>;
 }
 
 export function listMessages(

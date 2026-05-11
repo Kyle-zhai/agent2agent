@@ -2,8 +2,9 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getCurrentUser, signOut } from "@/lib/auth";
 import { listAgentsForUser } from "@/lib/agents";
-import { listConversationsForUser } from "@/lib/conversations";
+import { listConversationsWithState } from "@/lib/conversations";
 import { listIncomingRequests } from "@/lib/friends";
+import { getUserAvatarPath } from "@/lib/users";
 
 export const dynamic = "force-dynamic";
 
@@ -21,8 +22,17 @@ export default async function AppLayout({
   const user = await getCurrentUser();
   if (!user) redirect("/sign-in");
   const agents = listAgentsForUser(user.id);
-  const conversations = listConversationsForUser(user.id);
+  const convs = listConversationsWithState(user.id);
   const incoming = listIncomingRequests(user.id);
+
+  const pinned = convs
+    .filter((c) => c.state.pinned_at && !c.state.archived_at)
+    .sort((a, b) => (b.state.pinned_at ?? 0) - (a.state.pinned_at ?? 0));
+  const active = convs
+    .filter((c) => !c.state.pinned_at && !c.state.archived_at)
+    .sort((a, b) => (b.last_message?.created_at ?? 0) - (a.last_message?.created_at ?? 0));
+  const archived = convs.filter((c) => c.state.archived_at);
+  const userAvatar = getUserAvatarPath(user.id);
 
   return (
     <div className="min-h-screen flex">
@@ -64,44 +74,32 @@ export default async function AppLayout({
           <SidebarLink href="/app/search" icon="🔎" label="Search" />
         </nav>
 
+        {pinned.length > 0 ? (
+          <SidebarSection title="Pinned">
+            {pinned.map((c) => <ConvLink key={c.conversation.id} bundle={c} />)}
+          </SidebarSection>
+        ) : null}
+
         <SidebarSection title="Conversations">
-          {conversations.length === 0 ? (
+          {active.length === 0 ? (
             <div className="px-3 py-2 text-[13px] text-[color:var(--color-ink-soft)]">
               No conversations yet.
             </div>
           ) : (
-            conversations.map((c) => (
-              <Link
-                key={c.id}
-                href={`/app/c/${c.id}`}
-                className="block px-2 py-2 rounded-md text-[13px] hover:bg-[color:var(--color-canvas)] transition-colors"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="truncate">
-                    {c.type === "group"
-                      ? c.title ?? "Untitled group"
-                      : (() => {
-                          const other = c.member_agent_ids.find(
-                            (id) => id !== c.my_agent_id,
-                          );
-                          return other ?? "Direct";
-                        })()}
-                  </span>
-                  {c.unread_count > 0 ? (
-                    <span className="text-[10px] font-mono px-1.5 rounded-full bg-[color:var(--color-tint-blue-ink)] text-white">
-                      {c.unread_count}
-                    </span>
-                  ) : null}
-                </div>
-                {c.last_message ? (
-                  <div className="text-[11px] text-[color:var(--color-ink-soft)] truncate mt-0.5">
-                    {c.last_message.text || "(file/context)"}
-                  </div>
-                ) : null}
-              </Link>
-            ))
+            active.map((c) => <ConvLink key={c.conversation.id} bundle={c} />)
           )}
         </SidebarSection>
+
+        {archived.length > 0 ? (
+          <details className="px-2 py-3 border-t border-[color:var(--color-line)]">
+            <summary className="px-2 mb-1 text-[10px] uppercase tracking-wider font-medium text-[color:var(--color-ink-soft)] cursor-pointer hover:text-[color:var(--color-ink)]">
+              Archived ({archived.length})
+            </summary>
+            <div className="flex flex-col">
+              {archived.map((c) => <ConvLink key={c.conversation.id} bundle={c} />)}
+            </div>
+          </details>
+        ) : null}
 
         <SidebarSection title="My agents">
           {agents.length === 0 ? (
@@ -125,15 +123,32 @@ export default async function AppLayout({
           )}
         </SidebarSection>
 
-        <div className="mt-auto px-3 py-3 border-t border-[color:var(--color-line)] flex items-center justify-between">
-          <div className="text-[12px]">
-            <div className="font-medium truncate max-w-[160px]">
-              {user.display_name}
+        <div className="mt-auto px-3 py-3 border-t border-[color:var(--color-line)] flex items-center justify-between gap-2">
+          <Link
+            href="/app/me"
+            className="flex items-center gap-2 min-w-0 hover:bg-[color:var(--color-canvas)] rounded-md px-1.5 py-1 -mx-1.5 transition-colors"
+            title="Edit profile"
+          >
+            {userAvatar ? (
+              <img
+                src="/api/v1/avatars/me"
+                alt=""
+                className="w-7 h-7 rounded-full object-cover border border-[color:var(--color-line)]"
+              />
+            ) : (
+              <div className="w-7 h-7 rounded-full bg-[color:var(--color-tint-blue)] flex items-center justify-center text-sm">
+                🧑
+              </div>
+            )}
+            <div className="text-[12px] min-w-0">
+              <div className="font-medium truncate max-w-[140px]">
+                {user.display_name}
+              </div>
+              <div className="text-[11px] text-[color:var(--color-ink-soft)] truncate max-w-[140px]">
+                {user.email}
+              </div>
             </div>
-            <div className="text-[11px] text-[color:var(--color-ink-soft)] truncate max-w-[160px]">
-              {user.email}
-            </div>
-          </div>
+          </Link>
           <form action={logoutAction}>
             <button className="btn btn-ghost btn-sm" title="Log out">
               ↪
@@ -171,6 +186,53 @@ function SidebarLink({
         <span className="text-[10px] font-mono px-1.5 rounded-full bg-[color:var(--color-tint-amber-ink)] text-white">
           {badge}
         </span>
+      ) : null}
+    </Link>
+  );
+}
+
+function ConvLink({
+  bundle,
+}: {
+  bundle: {
+    conversation: { id: string; type: "direct" | "group"; title: string | null };
+    member_agent_ids: string[];
+    my_agent_id: string;
+    last_message: { text: string; created_at: number } | null;
+    unread_count: number;
+    state: { pinned_at: number | null; muted_at: number | null; archived_at: number | null };
+  };
+}) {
+  const c = bundle;
+  const display =
+    c.conversation.type === "group"
+      ? c.conversation.title ?? "Untitled group"
+      : (() => {
+          const other = c.member_agent_ids.find((id) => id !== c.my_agent_id);
+          return other ?? "Direct";
+        })();
+  const showBadge = c.unread_count > 0 && !c.state.muted_at;
+  return (
+    <Link
+      href={`/app/c/${c.conversation.id}`}
+      className="block px-2 py-2 rounded-md text-[13px] hover:bg-[color:var(--color-canvas)] transition-colors"
+    >
+      <div className="flex items-center justify-between gap-1">
+        <span className="truncate flex items-center gap-1">
+          {c.state.pinned_at ? <span className="text-[9px]" title="pinned">📌</span> : null}
+          {c.state.muted_at ? <span className="text-[9px]" title="muted">🔕</span> : null}
+          <span className="truncate">{display}</span>
+        </span>
+        {showBadge ? (
+          <span className="text-[10px] font-mono px-1.5 rounded-full bg-[color:var(--color-tint-blue-ink)] text-white">
+            {c.unread_count}
+          </span>
+        ) : null}
+      </div>
+      {c.last_message ? (
+        <div className="text-[11px] text-[color:var(--color-ink-soft)] truncate mt-0.5">
+          {c.last_message.text || "(file/context)"}
+        </div>
       ) : null}
     </Link>
   );

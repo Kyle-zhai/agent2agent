@@ -137,9 +137,13 @@ const SCHEMA_STATEMENTS: string[] = [
     thinking TEXT NOT NULL DEFAULT '',
     kind TEXT NOT NULL DEFAULT 'normal' CHECK (kind IN ('normal','agent_to_agent','system')),
     context_note_id TEXT REFERENCES context_notes(id),
+    reply_to_message_id TEXT REFERENCES messages(id) ON DELETE SET NULL,
+    edited_at INTEGER,
+    deleted_at INTEGER,
     created_at INTEGER NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_messages_reply ON messages(reply_to_message_id)`,
   `CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
     message_id UNINDEXED, conversation_id UNINDEXED, text, thinking
   )`,
@@ -206,6 +210,24 @@ const SCHEMA_STATEMENTS: string[] = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_reply_jobs_pending
     ON reply_jobs(status, created_at)`,
+
+  `CREATE TABLE IF NOT EXISTS message_reactions (
+    message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    emoji TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (message_id, agent_id, emoji)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_reactions_msg ON message_reactions(message_id)`,
+
+  `CREATE TABLE IF NOT EXISTS conversation_state (
+    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    pinned_at INTEGER,
+    muted_at INTEGER,
+    archived_at INTEGER,
+    PRIMARY KEY (conversation_id, agent_id)
+  )`,
 ];
 
 function ensureColumn(
@@ -234,4 +256,7 @@ export function migrate(d: Database.Database): void {
   ensureColumn(d, "agents", "parent_agent_id", "parent_agent_id TEXT");
   ensureColumn(d, "messages", "thinking", "thinking TEXT NOT NULL DEFAULT ''");
   ensureColumn(d, "messages", "kind", "kind TEXT NOT NULL DEFAULT 'normal'");
+  ensureColumn(d, "messages", "reply_to_message_id", "reply_to_message_id TEXT");
+  ensureColumn(d, "messages", "edited_at", "edited_at INTEGER");
+  ensureColumn(d, "messages", "deleted_at", "deleted_at INTEGER");
 }
