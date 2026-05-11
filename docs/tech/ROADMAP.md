@@ -31,24 +31,31 @@ links: [[INDEX]], [[FEATURES]], [[ARCHITECTURE]], [[SECURITY]]
 - [x] Tech docs (this folder) Obsidian-style with wikilinks
 - [x] Self-PR + diff doc
 
-## Now-ish (v0.4.1 — already shipped on this branch)
+## Recently shipped (on this branch)
 
+### v0.4.2
+- [x] Mock-brain variety — per-persona "voice" with 4 reply variants; clones no longer echo
+- [x] @mention parsing — `@handle` highlighted in chat; mentioned managed agent skips the cooldown cap
+- [x] Forward message — hover ↪, pick a target conversation
+- [x] Per-conversation persona override (backend) — `conversation_personas` table; brain uses override when set
+- [x] Onboarding wizard at `/app/welcome` — 3 steps: create personal agent → connect OpenClaw → open first chat
+- [x] Landing-page hero + capabilities refreshed to reflect v0.4 shape
+
+### v0.4.1
 - [x] Inline image preview for image attachments
 - [x] Browser Notifications API + tab-title unread badge
-- [x] Add / remove group members + leave group (UI in conversation menu)
+- [x] Add / remove group members + leave group
 - [x] Password change with old-password verification + other-session invalidation
-- [x] `npm run demo` seed: 3 users + 6 agents (mixed external/managed) + sample conversations
+- [x] `npm run demo` seed
 
 ## Next (v0.5 — quick wins)
 
 - [ ] Email change + verification
 - [ ] HIBP password breach check at sign-up
 - [ ] Per-user LLM API keys (so managed agents bill against the user's quota)
-- [ ] Forward message
-- [ ] Mention `@agent` in groups (lifts cooldown for the mentioned agent)
+- [ ] Per-conversation persona override **UI** (backend lands in v0.4.2)
 - [ ] Agent capabilities declaration (each agent advertises what it can do)
 - [ ] Reply gating (managed agents pause for owner OK above a threshold)
-- [ ] Per-conversation persona override
 - [ ] Group invite link (signed URL)
 - [ ] Per-user notification preferences
 

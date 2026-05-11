@@ -191,12 +191,34 @@ function autoFriendOwnAgents(userId: string, newAgentId: string): void {
 
 const PER_AGENT_PER_MINUTE_CAP = 4;
 
+const MENTION_RE = /@([a-z][a-z0-9-]{1,29})\b/g;
+
+export function extractMentionedHandles(text: string): string[] {
+  const out: string[] = [];
+  for (const m of text.matchAll(MENTION_RE)) {
+    out.push(m[1]);
+  }
+  return out;
+}
+
 export function enqueueRepliesForMessage(
   conversationId: string,
   triggerMessageId: string,
   fromAgentId: string,
 ): void {
   const members = listMembers(conversationId).map((m) => m.agent_id);
+  // Resolve mentions on the trigger message: @handle in text matches an
+  // agent in the room whose ID starts with `handle.`
+  const trigger = db()
+    .prepare("SELECT text FROM messages WHERE id = ?")
+    .get(triggerMessageId) as { text: string } | undefined;
+  const mentionedHandles = trigger ? extractMentionedHandles(trigger.text) : [];
+  const mentionedIds = new Set(
+    members.filter((mid) =>
+      mentionedHandles.some((h) => mid.toLowerCase().startsWith(h + ".")),
+    ),
+  );
+
   for (const mid of members) {
     if (mid === fromAgentId) continue;
     const a = getAgent(mid);
@@ -204,8 +226,7 @@ export function enqueueRepliesForMessage(
     const cfg = parseBrainConfig(a.brain_config_json);
     if (a.id === fromAgentId && !cfg.reply_to_self) continue;
 
-    // Cooldown: cap autonomous replies per managed agent per conversation
-    // to PER_AGENT_PER_MINUTE_CAP per minute. Stops infinite agent↔agent loops.
+    const isMentioned = mentionedIds.has(mid);
     const cutoff = Date.now() - 60_000;
     const recent = (
       db()
@@ -216,7 +237,9 @@ export function enqueueRepliesForMessage(
         )
         .get(conversationId, mid, cutoff) as { n: number }
     ).n;
-    if (recent >= PER_AGENT_PER_MINUTE_CAP) continue;
+    // Mentioned agents get one free reply past the cooldown — that's the
+    // whole point of @mention.
+    if (recent >= PER_AGENT_PER_MINUTE_CAP && !isMentioned) continue;
 
     db()
       .prepare(
@@ -299,7 +322,17 @@ async function processJob(job: {
     if (history.length === 0) {
       throw new Error("no history");
     }
-    const out = await generateReply(agent, history, cfg);
+    // Per-conversation persona override beats the base persona for this run.
+    const override = db()
+      .prepare(
+        `SELECT persona FROM conversation_personas
+         WHERE conversation_id = ? AND agent_id = ?`,
+      )
+      .get(job.conversation_id, agent.id) as { persona: string } | undefined;
+    const effectiveAgent: Agent = override
+      ? { ...agent, persona: override.persona }
+      : agent;
+    const out = await generateReply(effectiveAgent, history, cfg);
     if (!out.text.trim() && !out.thinking.trim()) {
       throw new Error("empty reply");
     }

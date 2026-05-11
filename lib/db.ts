@@ -228,6 +228,14 @@ const SCHEMA_STATEMENTS: string[] = [
     archived_at INTEGER,
     PRIMARY KEY (conversation_id, agent_id)
   )`,
+
+  `CREATE TABLE IF NOT EXISTS conversation_personas (
+    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    persona TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (conversation_id, agent_id)
+  )`,
 ];
 
 function ensureColumn(

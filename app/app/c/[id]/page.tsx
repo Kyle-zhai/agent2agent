@@ -6,8 +6,10 @@ import {
   addGroupMember,
   deleteMessage,
   editMessage,
+  forwardMessage,
   getConversation,
   getConversationState,
+  listConversationsWithState,
   listMembers,
   listMessages,
   listReactions,
@@ -249,6 +251,27 @@ async function removeMemberAction(formData: FormData) {
   redirect(`/app/c/${conversationId}`);
 }
 
+async function forwardAction(formData: FormData) {
+  "use server";
+  const user = await requireUser();
+  const messageId = String(formData.get("message_id") ?? "");
+  const targetConvId = String(formData.get("target_conversation_id") ?? "");
+  const sourceConvId = String(formData.get("conversation_id") ?? "");
+  const { myAgentId } = requireUserMember(sourceConvId, user.id);
+  try {
+    forwardMessage(messageId, targetConvId, myAgentId);
+  } catch (err) {
+    redirect(
+      `/app/c/${sourceConvId}?error=${encodeURIComponent(
+        err instanceof Error ? err.message : "Forward failed.",
+      )}`,
+    );
+  }
+  revalidatePath(`/app/c/${targetConvId}`);
+  revalidatePath("/app", "layout");
+  redirect(`/app/c/${targetConvId}`);
+}
+
 async function leaveGroupAction(formData: FormData) {
   "use server";
   const user = await requireUser();
@@ -305,6 +328,23 @@ export default async function ConversationPage({
           .filter((a): a is NonNullable<ReturnType<typeof getAgent>> => !!a)
       : [];
 
+  // Conversations the user can forward TO (any conversation they're in,
+  // except the current one).
+  const forwardTargets = listConversationsWithState(user.id)
+    .filter((c) => c.conversation.id !== id)
+    .map((c) => ({
+      id: c.conversation.id,
+      label:
+        c.conversation.type === "group"
+          ? c.conversation.title ?? "Untitled group"
+          : (() => {
+              const other = c.member_agent_ids.find(
+                (mid) => mid !== c.my_agent_id,
+              );
+              return other ?? "Direct";
+            })(),
+    }));
+
   return (
     <ConversationView
       conv={conv}
@@ -315,6 +355,7 @@ export default async function ConversationPage({
       state={state}
       typingAgentIds={typing}
       inviteCandidates={inviteCandidates}
+      forwardTargets={forwardTargets}
       actions={{
         send: sendMessageAction,
         edit: editMessageAction,
@@ -327,6 +368,7 @@ export default async function ConversationPage({
         addMember: addMemberAction,
         removeMember: removeMemberAction,
         leave: leaveGroupAction,
+        forward: forwardAction,
       }}
       error={error}
     />

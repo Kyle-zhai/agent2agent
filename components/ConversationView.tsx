@@ -27,7 +27,10 @@ type ChatActions = {
   addMember: (formData: FormData) => Promise<void>;
   removeMember: (formData: FormData) => Promise<void>;
   leave: (formData: FormData) => Promise<void>;
+  forward: (formData: FormData) => Promise<void>;
 };
+
+type ForwardTarget = { id: string; label: string };
 
 export function ConversationView({
   conv,
@@ -38,6 +41,7 @@ export function ConversationView({
   state,
   typingAgentIds,
   inviteCandidates,
+  forwardTargets,
   actions,
   error,
 }: {
@@ -49,6 +53,7 @@ export function ConversationView({
   state: ConversationState;
   typingAgentIds: string[];
   inviteCandidates: Agent[];
+  forwardTargets: ForwardTarget[];
   actions: ChatActions;
   error?: string;
 }) {
@@ -66,6 +71,10 @@ export function ConversationView({
 
   const memberById = useMemo(
     () => Object.fromEntries(members.map((m) => [m.id, m])) as Record<string, Agent>,
+    [members],
+  );
+  const memberHandles = useMemo(
+    () => members.map((m) => m.id.split(".")[0]),
     [members],
   );
   const myAgent = memberById[myAgentId];
@@ -294,6 +303,8 @@ export function ConversationView({
               setEditing,
               actions,
               conv.id,
+              memberHandles,
+              forwardTargets,
             )
           )}
           {typing.length > 0 ? <TypingRow agents={typing} /> : null}
@@ -464,6 +475,8 @@ function renderWithDateDividers(
   setEditing: (m: MessageWithRelations | null) => void,
   actions: ChatActions,
   convId: string,
+  memberHandles: string[],
+  forwardTargets: ForwardTarget[],
 ): React.ReactNode[] {
   const out: React.ReactNode[] = [];
   let prevDay = "";
@@ -500,6 +513,8 @@ function renderWithDateDividers(
             : undefined
         }
         myAgentId={myAgentId}
+        memberHandles={memberHandles}
+        forwardTargets={forwardTargets}
         onReply={() => setReplyTo(m)}
         onEdit={() => setEditing(m)}
         actions={actions}
@@ -548,6 +563,8 @@ function Bubble({
   replyToMessage,
   replyToAuthor,
   myAgentId,
+  memberHandles,
+  forwardTargets,
   onReply,
   onEdit,
   actions,
@@ -561,6 +578,8 @@ function Bubble({
   replyToMessage: MessageWithRelations | null;
   replyToAuthor?: Agent;
   myAgentId: string;
+  memberHandles: string[];
+  forwardTargets: ForwardTarget[];
   onReply: () => void;
   onEdit: () => void;
   actions: ChatActions;
@@ -568,6 +587,7 @@ function Bubble({
 }) {
   const [hovered, setHovered] = useState(false);
   const [showReactions, setShowReactions] = useState(false);
+  const [showForward, setShowForward] = useState(false);
   const within5min = Date.now() - message.created_at < 5 * 60_000;
   const canEdit = isMine && within5min && !message.deleted_at && message.text;
   const canDelete = isMine && within5min && !message.deleted_at;
@@ -627,12 +647,11 @@ function Bubble({
             {message.deleted_at ? (
               <span className="text-[13.5px]">message deleted</span>
             ) : message.text ? (
-              <div
-                className={`text-[14.5px] leading-[1.45] break-words whitespace-pre-wrap ${
-                  isMine ? "" : ""
-                }`}
-              >
-                <MessageMarkdown text={message.text} />
+              <div className="text-[14.5px] leading-[1.45] break-words whitespace-pre-wrap">
+                <MessageMarkdown
+                  text={message.text}
+                  memberHandles={memberHandles}
+                />
               </div>
             ) : null}
             {message.attachments.length > 0 && !message.deleted_at ? (
@@ -713,6 +732,9 @@ function Bubble({
               onEdit={onEdit}
               onTogglePicker={() => setShowReactions((v) => !v)}
               showPicker={showReactions}
+              onToggleForward={() => setShowForward((v) => !v)}
+              showForward={showForward}
+              forwardTargets={forwardTargets}
               actions={actions}
               convId={convId}
             />
@@ -747,6 +769,9 @@ function HoverActions({
   onEdit,
   onTogglePicker,
   showPicker,
+  onToggleForward,
+  showForward,
+  forwardTargets,
   actions,
   convId,
 }: {
@@ -759,6 +784,9 @@ function HoverActions({
   onEdit: () => void;
   onTogglePicker: () => void;
   showPicker: boolean;
+  onToggleForward: () => void;
+  showForward: boolean;
+  forwardTargets: ForwardTarget[];
   actions: ChatActions;
   convId: string;
 }) {
@@ -768,6 +796,9 @@ function HoverActions({
     >
       <ActionIcon title="React" onClick={onTogglePicker}>😊</ActionIcon>
       <ActionIcon title="Reply" onClick={onReply}>↩</ActionIcon>
+      {forwardTargets.length > 0 ? (
+        <ActionIcon title="Forward" onClick={onToggleForward}>↪</ActionIcon>
+      ) : null}
       {text ? (
         <ActionIcon
           title="Copy"
@@ -808,6 +839,26 @@ function HoverActions({
                 className="w-7 h-7 rounded-full hover:bg-[color:var(--color-canvas)] text-base"
               >
                 {e}
+              </button>
+            </form>
+          ))}
+        </div>
+      ) : null}
+      {showForward ? (
+        <div className="absolute top-full mt-2 right-0 surface shadow-[var(--shadow-pop)] py-1 w-64 max-h-72 overflow-y-auto z-20">
+          <div className="px-3 py-1.5 text-[11px] uppercase tracking-wider text-[color:var(--color-ink-soft)]">
+            Forward to…
+          </div>
+          {forwardTargets.map((t) => (
+            <form key={t.id} action={actions.forward}>
+              <input type="hidden" name="conversation_id" value={convId} />
+              <input type="hidden" name="message_id" value={messageId} />
+              <input type="hidden" name="target_conversation_id" value={t.id} />
+              <button
+                type="submit"
+                className="w-full text-left px-3 py-1.5 text-[13px] hover:bg-[color:var(--color-canvas)] truncate"
+              >
+                {t.label}
               </button>
             </form>
           ))}

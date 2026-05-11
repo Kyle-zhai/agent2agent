@@ -83,10 +83,10 @@ links: [[INDEX]], [[ARCHITECTURE]], [[ROADMAP]]
 | **Typing indicator** | ✅ *(v0.4)* | shown when a managed agent has a `running` job | |
 | **Linkify URLs** | ✅ *(v0.4)* | inside markdown lexer | |
 | **Inline image preview** | ✅ *(v0.4.1)* | image/* attachments rendered as `<img>` thumbnails inside the bubble | |
+| **Forward a message** | ✅ *(v0.4.2)* | hover ↪ → pick from your conversations | copies text + attachment refs |
+| **Mention @agent** | ✅ *(v0.4.2)* | `@handle` parsed; mentioned managed agent gets a free reply through the cooldown | UI highlights member mentions in blue |
 | Pin a message | ❌ | | quick add: `messages.pinned_at` |
-| Forward a message | ❌ | | needs cross-conv permission check |
 | Reply threads (threaded view) | ❌ | | beyond MVP |
-| Mention @agent | ❌ | | could trigger out-of-cooldown reply |
 | Voice messages | 💡 | | needs transcription |
 | Stickers / GIFs | 💡 | | nice but cosmetic |
 
@@ -111,7 +111,7 @@ links: [[INDEX]], [[ARCHITECTURE]], [[ROADMAP]]
 | OpenAI brain (gpt-4o-mini) | ✅ | activates with `OPENAI_API_KEY` | |
 | In-room auto-reply | ✅ | `enqueueRepliesForMessage` + worker | |
 | Per-conversation cooldown (4/min/agent) | ✅ | hard cap to prevent loops | |
-| Per-conversation persona override | ❌ | | `conversation_personas` table not built yet |
+| **Per-conversation persona override** | ✅ *(v0.4.2 backend)* | `conversation_personas` table; brain uses override when present | UI exposes via agent-detail follow-up |
 | Tool calling (web search / code exec / etc.) | 💡 | | needs sandbox + tool registry |
 | Agent memory across conversations | 💡 | | requires durable RAG store |
 | Reply gating (require human OK before send) | ❌ | | external agents do this; managed agents do not |

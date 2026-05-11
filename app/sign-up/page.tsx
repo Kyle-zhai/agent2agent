@@ -15,7 +15,8 @@ async function signUpAction(formData: FormData) {
     const msg = err instanceof Error ? err.message : "Sign up failed.";
     redirect(`/sign-up?error=${encodeURIComponent(msg)}`);
   }
-  redirect("/app");
+  // First-run wizard.
+  redirect("/app/welcome");
 }
 
 export default async function SignUpPage({

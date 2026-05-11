@@ -640,6 +640,49 @@ export function editMessage(
   return { ...m, text, edited_at: now };
 }
 
+export function forwardMessage(
+  sourceMessageId: string,
+  targetConversationId: string,
+  byAgentId: string,
+): MessageWithRelations {
+  const src = db()
+    .prepare("SELECT * FROM messages WHERE id = ?")
+    .get(sourceMessageId) as Message | undefined;
+  if (!src) throw new Error("Source message not found.");
+  if (src.deleted_at) throw new Error("Cannot forward a deleted message.");
+  if (!isMember(src.conversation_id, byAgentId)) {
+    throw new Error("Not a member of source conversation.");
+  }
+  if (!isMember(targetConversationId, byAgentId)) {
+    throw new Error("Not a member of target conversation.");
+  }
+  if (src.conversation_id === targetConversationId) {
+    throw new Error("Pick a different conversation to forward to.");
+  }
+  // Copy attachments by reference (same blob ids).
+  const atts = db()
+    .prepare(
+      "SELECT attachment_id FROM message_attachments WHERE message_id = ?",
+    )
+    .all(sourceMessageId) as { attachment_id: string }[];
+  const fromAgent = db()
+    .prepare("SELECT display_name FROM agents WHERE id = ?")
+    .get(src.from_agent_id) as { display_name: string } | undefined;
+  const when = new Date(src.created_at).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "UTC",
+  });
+  const text = `↪ Forwarded from ${fromAgent?.display_name ?? src.from_agent_id} (${when}):\n${src.text}`;
+  return sendMessage(targetConversationId, byAgentId, {
+    text,
+    attachment_ids: atts.map((a) => a.attachment_id),
+    kind: "normal",
+  });
+}
+
 export function deleteMessage(
   messageId: string,
   fromAgentId: string,
@@ -962,6 +1005,48 @@ export function listConversationsWithState(userId: string): Array<{
       unread_count: unread,
     };
   });
+}
+
+export function getPersonaOverride(
+  conversationId: string,
+  agentId: string,
+): string | null {
+  const row = db()
+    .prepare(
+      `SELECT persona FROM conversation_personas
+       WHERE conversation_id = ? AND agent_id = ?`,
+    )
+    .get(conversationId, agentId) as { persona: string } | undefined;
+  return row?.persona ?? null;
+}
+
+export function setPersonaOverride(
+  conversationId: string,
+  agentId: string,
+  persona: string,
+): void {
+  if (!isMember(conversationId, agentId)) {
+    throw new Error("Agent is not a member of this conversation.");
+  }
+  const trimmed = persona.trim().slice(0, 4000);
+  const now = Date.now();
+  if (!trimmed) {
+    db()
+      .prepare(
+        `DELETE FROM conversation_personas
+         WHERE conversation_id = ? AND agent_id = ?`,
+      )
+      .run(conversationId, agentId);
+    return;
+  }
+  db()
+    .prepare(
+      `INSERT INTO conversation_personas (conversation_id, agent_id, persona, updated_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(conversation_id, agent_id) DO UPDATE SET
+         persona = excluded.persona, updated_at = excluded.updated_at`,
+    )
+    .run(conversationId, agentId, trimmed, now);
 }
 
 export function listRunningReplyJobsForConversation(
