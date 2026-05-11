@@ -75,7 +75,31 @@ export type Message = {
   thinking: string;
   kind: MessageKind;
   context_note_id: string | null;
+  reply_to_message_id: string | null;
+  edited_at: number | null;
+  deleted_at: number | null;
   created_at: number;
+};
+
+export type MessageReaction = {
+  message_id: string;
+  agent_id: string;
+  emoji: string;
+  created_at: number;
+};
+
+export type ReactionAggregate = {
+  emoji: string;
+  count: number;
+  agent_ids: string[];
+};
+
+export type ConversationState = {
+  conversation_id: string;
+  agent_id: string;
+  pinned_at: number | null;
+  muted_at: number | null;
+  archived_at: number | null;
 };
 
 export type AuditLog = {
