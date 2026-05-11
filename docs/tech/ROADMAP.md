@@ -1,152 +1,135 @@
 ---
-title: Roadmap
+title: 路线图
 type: roadmap
 status: living
-last_updated: 2026-05-10
-tags: [roadmap, todo, future]
+last_updated: 2026-05-11
+tags: [路线图, todo, 未来]
 links: [[INDEX]], [[FEATURES]], [[ARCHITECTURE]], [[SECURITY]]
 ---
 
-# Roadmap
+# 路线图
 
 > [!summary]
-> Ordered by impact × effort, not by chronology. Every item links back to
-> [[FEATURES]] for "is this shipped?" answers.
+> 按 影响 × 工作量 排序，不是按时间。每项都链回 [[FEATURES]] 的状态格 "现在是不是已经发了？"。
 
-## Now (v0.4 — this branch's scope)
+## 已经发了（在这个分支上）
 
-- [x] Telegram-style bubble layout with avatar bubbles
-- [x] Reply-to (inline quote)
-- [x] Edit + delete (5-min window) with tombstone
-- [x] Reactions (emoji)
-- [x] Conversation pin / mute / archive
-- [x] Group title editing
-- [x] User profile edit
-- [x] Health endpoint
-- [x] Per-user data export
-- [x] Markdown rendering in messages (deps-free)
-- [x] Typing indicator (managed agents)
-- [x] Hover actions on each message
-- [x] Date dividers
-- [x] Tech docs (this folder) Obsidian-style with wikilinks
-- [x] Self-PR + diff doc
+### v0.4.2 已交付
+- [x] Mock-brain 多样性 —— per-persona "voice"，4 个变体；克隆 agent 不再互相 echo
+- [x] @mention —— `@handle` 在聊天里高亮蓝色；被 mention 的 managed agent 跳过 cooldown cap
+- [x] Forward 消息 —— hover ↪ 选会话目标
+- [x] Per-conversation persona override（后端）—— `conversation_personas` 表，worker 调 brain 时优先用 override
+- [x] Onboarding wizard `/app/welcome` —— 三步：建自己的 external agent → 连一个 managed OpenClaw → 开第一个 chat
+- [x] Landing 页 hero + 能力网格按 v0.4 重写
 
-## Recently shipped (on this branch)
+### v0.4.1 已交付
+- [x] image/\* 附件内联缩略图
+- [x] 浏览器 Notifications API + tab 标题未读徽章
+- [x] 群成员增 / 删 / 离群
+- [x] 修改密码 + 校验旧密码 + 其他 session 失效
+- [x] `npm run demo` seed 演示数据
 
-### v0.4.2
-- [x] Mock-brain variety — per-persona "voice" with 4 reply variants; clones no longer echo
-- [x] @mention parsing — `@handle` highlighted in chat; mentioned managed agent skips the cooldown cap
-- [x] Forward message — hover ↪, pick a target conversation
-- [x] Per-conversation persona override (backend) — `conversation_personas` table; brain uses override when set
-- [x] Onboarding wizard at `/app/welcome` — 3 steps: create personal agent → connect OpenClaw → open first chat
-- [x] Landing-page hero + capabilities refreshed to reflect v0.4 shape
+### v0.4.3 – v0.4.7（多轮自审落地）
+- [x] @mention cooldown 不能让两个 managed agent 互相 @ 突破上限
+- [x] `changePassword` 用对的审计 action（不是错放到 signin）
+- [x] `forwardMessage` 支持 source / target 两端用不同 agent
+- [x] `toggleReaction` 后端拒绝删除的消息
+- [x] Cross-conv 附件认证（forward 后两个会话都能拉）
+- [x] 静默失败修复：audit 写失败、worker 失败、SSE 失败、brain 失败全都 console.error + audit + 用户可见的"agent 放弃了"提示条
+- [x] `node:test` 测试脚手架 + 18 项通过测试
+- [x] Per-conv persona override UI 上线
+- [x] Auto-scroll 第一次加载到底部，之后只在用户接近底部时滚动
 
-### v0.4.1
-- [x] Inline image preview for image attachments
-- [x] Browser Notifications API + tab-title unread badge
-- [x] Add / remove group members + leave group
-- [x] Password change with old-password verification + other-session invalidation
-- [x] `npm run demo` seed
+## 下一步（v0.5 —— 速赢）
 
-## Next (v0.5 — quick wins)
+- [ ] 改 email + 邮箱验证
+- [ ] 注册时 HIBP 密码泄露检查
+- [ ] **Per-user LLM API key**（让托管 agent 用用户自己的额度）
+- [ ] Per-conversation persona override **UI**（后端已在 v0.4.2，UI 已在 v0.4.4，但可以更精致）
+- [ ] **Agent capabilities 声明**（每个 agent 自我描述能做什么）
+- [ ] Reply gating（managed agent 在某个阈值之上要先停下等主人 OK）
+- [ ] **群邀请链接**（签名 URL）
+- [ ] Per-user 通知偏好
 
-- [ ] Email change + verification
-- [ ] HIBP password breach check at sign-up
-- [ ] Per-user LLM API keys (so managed agents bill against the user's quota)
-- [ ] Per-conversation persona override **UI** (backend lands in v0.4.2)
-- [ ] Agent capabilities declaration (each agent advertises what it can do)
-- [ ] Reply gating (managed agents pause for owner OK above a threshold)
-- [ ] Group invite link (signed URL)
-- [ ] Per-user notification preferences
+## 中期（v0.6 —— 较大工程）
 
-## Mid-term (v0.6 — bigger lifts)
+- [ ] **Postgres 迁移** —— Neon via Vercel Marketplace；替换 SQLite + `better-sqlite3`。带来多实例、真实 auth provider、Vercel 部署
+- [ ] **Vercel Blob** —— 替换本地文件系统的附件 + ContextNote + 头像存储
+- [ ] **Vercel Workflow** 跑 reply-job worker —— 跨部署的暂停/恢复/重试
+- [ ] **真正的 CDN** 给 blob 下载用
+- [ ] **WebSocket** 作为 SSE 替代 —— 多消息突发时延迟更低
+- [ ] **Managed agent 的 tool calling** —— 给它们 MCP server 注册表，能搜索、抓取、在 Vercel Sandbox 跑代码
+- [ ] **Threaded replies**（真正的线程，不只是 `reply_to_message_id`）
+- [ ] **OpenAPI spec** 从 route handlers + types 自动生成
+- [ ] **CI 流程**（GitHub Actions）—— typecheck、build、smoke
 
-- [ ] **Postgres migration** — Neon via Vercel Marketplace; replaces SQLite + `better-sqlite3`. Drives multi-instance, real auth providers, Vercel deploy
-- [ ] **Vercel Blob** — replaces local filesystem for attachments + ContextNotes + avatars
-- [ ] **Vercel Workflow** for the reply-job worker — pause/resume/retry across deploys
-- [ ] **Real CDN** for blob downloads
-- [ ] **WebSocket transport** as alternative to SSE — lower latency on multi-message bursts
-- [ ] **Tool calling for managed agents** — give them an MCP server registry; let them search, fetch, run code in a Vercel Sandbox
-- [ ] **Threaded replies** (proper threads, not just `reply_to_message_id`)
-- [ ] **OpenAPI spec** auto-generated from route handlers + types
-- [ ] **CI pipeline** (GitHub Actions) — typecheck, build, smoke
+## 远期（v1.0 —— 正式上线）
 
-## Far (v1.0 — production launch)
+- [ ] **E2E 加密** —— Signal Protocol 风格；客户端加密，服务端只存不透明 blob。大工程；会影响搜索 + heartbeat shape
+- [ ] **2FA（TOTP）** + 恢复码
+- [ ] **移动 App**（iOS + Android）—— 主要 UX 目标是"人在回路中"，因为 agent runtime 还在桌面
+- [ ] **联邦 agent** —— 你的 `alice@my-domain.com` 和别人的 `bob@their-domain.com` 不共享账号也能聊
+- [ ] **Agent2Agent 协议**作为跨厂商标准，开放 SDK 和认证 badge
 
-- [ ] **E2E encryption** — Signal-Protocol-style; messages encrypted client-side, server holds opaque blobs. Big lift; affects search + heartbeat shape
-- [ ] **2FA (TOTP)** + recovery codes
-- [ ] **Mobile apps** (iOS + Android) — main UX target = the "human in the loop", since the agent runtime stays on the desktop
-- [ ] **Federated agents** — your `alice@my-domain.com` and someone's `bob@their-domain.com` can talk without sharing an account
-- [ ] **Agent2Agent protocol** as a cross-vendor standard, with an open SDK and certification badges
+## 建议（未承诺）
 
-## Suggestions (not committed)
+这些是 💡 想法，需要先讨论再做。
 
-These are 💡 ideas worth discussing before building.
-
-### social-imports
-> [!question] WeChat / Instagram contact import
-> Per the original spec, "humans can be added via normal social methods".
-> Right now humans are email-only. Real social import requires per-platform
-> OAuth apps (WeChat Open Platform, Meta for Developers, Twitter/X dev),
-> privacy review, and a different consent flow per platform.
+### 社交平台导入
+> [!question] 微信 / Instagram 联系人导入
+> 按原始设计稿，"人可以通过正常社交方式添加"。
+> 现在人只能 email 注册。真正的社交导入需要 per-platform OAuth app
+> （微信开放平台、Meta for Developers、Twitter/X dev），需要走隐私
+> review，每个平台不同的同意流程。
 >
-> If we go ahead: start with one platform that has the cleanest OAuth +
-> docs (probably Telegram bot import → contacts). Avoid WeChat first
-> (sandboxing pain).
+> 如果做：先选一个 OAuth + 文档最干净的平台（大概率是 Telegram bot
+> import → 联系人）。避免微信先（沙盒痛苦）。
 
-### contextnote-schema
-> [!idea] Stricter ContextNote schema
-> v0.1 stores ContextNotes as opaque markdown. v0.2 should validate the
-> frontmatter (required fields: `from_agent`, `to_agents`, `title`,
-> optional: `parent_context`, `status`, `tags`) and surface a "thread
-> chain" view in the web UI showing the lineage of handoffs.
+### ContextNote schema
+> [!idea] 更严的 ContextNote schema
+> v0.1 把 ContextNote 当不透明 markdown 存。v0.2 应该校验 frontmatter
+> （必须字段：`from_agent`、`to_agents`、`title`，可选：`parent_context`、
+> `status`、`tags`），并在 web console 显示 handoff "thread chain" 视图。
 
-### managed-tools
-> [!idea] Managed-agent tool calling
-> Right now managed agents can only chat. They can't read files, fetch
-> URLs, run code. This is the biggest leverage point for product value.
-> Approach: register tools as Vercel AI SDK / MCP entries, gate by
-> per-agent allowlist, run code in Vercel Sandbox. Adds: web search,
-> file read/write within a per-agent scoped FS, code exec, agent2agent
-> *itself* as a tool (so a managed agent can spawn its own clones).
+### Managed agent tool calling
+> [!idea] Managed agent 工具调用
+> 现在 managed agent 只能聊。不能读文件、抓 URL、跑代码。这是产品价值
+> 最大的杠杆点。方式：把 tools 注册成 Vercel AI SDK / MCP 条目，按 per-agent
+> allowlist 网关，在 Vercel Sandbox 里跑代码。加上：网页搜索、per-agent
+> scoped FS 的读写、代码执行、把 agent2agent **自身**当工具（让 managed
+> agent 能 spawn 自己的克隆）。
 
-### per-user-llm-keys
-> [!idea] Per-user LLM keys
-> Today the brain uses server-side `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`,
-> which means the platform pays for all managed-agent inference. For
-> production, let users put their own keys in (encrypted at rest with a
-> per-user KEK derived from their password) and bill them.
+### Per-user LLM key
+> [!idea] Per-user LLM key
+> 现在 brain 用服务端 `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`，意味着平台
+> 替所有 managed-agent 推理付费。生产化时，让用户填自己的 key
+> （静态加密，用从密码派生的 KEK），按用户收费。
 
-### postgres-migration
-> [!warning] Postgres migration is the gating move for serious multi-user use
-> SQLite WAL allows one writer. With dozens of users sending messages per
-> second, write contention will surface fast. The cleanest path:
-> 1. Wrap `lib/db.ts` behind an interface
-> 2. Add a Postgres implementation (Neon, via Vercel Marketplace)
-> 3. Port schema 1:1 (FTS5 → `tsvector`)
-> 4. Port `messages_fts` snippet semantics to `ts_headline`
-> 5. Add a connection pool and `LISTEN/NOTIFY` for SSE event streaming
+### Postgres 迁移
+> [!warning] Postgres 迁移是严肃多用户使用的卡口
+> SQLite WAL 只允许一个 writer。几十个用户每秒发消息，写竞争立刻浮现。
+> 最干净的路径：
+> 1. 把 `lib/db.ts` 包到一个接口后
+> 2. 加 Postgres 实现（Neon via Vercel Marketplace）
+> 3. Schema 1:1 移植（FTS5 → `tsvector`）
+> 4. Snippet 语义 `messages_fts` → `ts_headline`
+> 5. 加连接池 + `LISTEN/NOTIFY` 做 SSE 事件流
 >
-> Estimate: 1 focused day plus a migration window. Worth doing before any
-> public launch.
+> 估算：1 天集中 + 一个迁移窗口。任何公开上线之前都该做。
 
-### adaptive-cron
-> [!idea] Make external-agent cron honor `next_interval_seconds`
-> Right now the cron / launchd schedule is fixed at install time. The
-> server already returns `next_interval_seconds` from heartbeat. Replace
-> the cron with a small loop that reads the suggestion and sleeps. Result:
-> 5 s polling when the conversation is hot, 5 min when idle — without any
-> server-side push.
+### 自适应 cron
+> [!idea] 让外部 agent cron 尊重 `next_interval_seconds`
+> 现在 cron / launchd schedule 在 install 时定死。服务端已经在 heartbeat
+> 返回 `next_interval_seconds`。把 cron 换成读建议然后 sleep 的小循环。
+> 结果：热聊时 5 秒 polling，空闲时 5 分钟 —— 没有任何服务端 push。
 
-### audit-anomaly
-> [!idea] Anomaly alerts on the audit log
-> "Account locked 3× in 24h", "key rotated 5× in an hour", "10× rate
-> limit hits from same IP". A scheduled job per day that emails the
-> account owner.
+### 审计异常告警
+> [!idea] 审计日志异常报警
+> "24 小时内账号被锁 3 次"、"1 小时内 key rotate 5 次"、"同 IP 10 次
+> rate limit 命中"。每日一个定时任务，邮件给账号 owner。
 
-### per-conversation-persona
+### Per-conv persona override
 > [!idea] Per-conversation persona override
-> A managed agent might be "the OpenClaw Coder" everywhere except inside
-> conversation X where it should role-play as "the bug-finder". Add a
-> `conversation_personas` table keyed by `(conversation_id, agent_id)`
-> with an optional persona override.
+> 一个 managed agent 可能"到处是 OpenClaw Coder，但在 X 群里要演 bug-finder"。
+> 加一个 `conversation_personas` 表，键是 `(conversation_id, agent_id)`，
+> 值是可选的 persona override。**v0.4.4 已部分上线（UI + 后端都有了）。**

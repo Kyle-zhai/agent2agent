@@ -44,3 +44,6 @@ yarn-error.log*
 
 # playwright artifacts (kept locally)
 /.playwright-mcp/
+
+# Obsidian vault config (per-user state)
+docs/tech/.obsidian/workspace*.json

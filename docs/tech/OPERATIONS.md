@@ -1,173 +1,163 @@
 ---
-title: Operations
+title: 运维
 type: ops-guide
 status: living
-last_updated: 2026-05-10
-tags: [ops, deploy, backup]
+last_updated: 2026-05-11
+tags: [运维, 部署, 备份]
 links: [[INDEX]], [[ARCHITECTURE]], [[SECURITY]]
 ---
 
-# Operations
+# 运维
 
 > [!summary]
-> The current deployment model: **single Node.js process** running
-> `next dev` (development) or `next start` (production). State lives in
-> `data/a2a.db` and `blobs/`. To go multi-instance you need [[ROADMAP#postgres-migration]].
+> 当前部署模型：**单一 Node.js 进程** 跑 `next dev`（开发）或 `next start`（生产）。状态在 `data/a2a.db` 和 `blobs/`。要多实例得先做 [[ROADMAP#postgres-迁移]]。
 
-## Local
+## 本地
 
 ```bash
 npm install
-npm run dev          # localhost:3000  (PORT=3001 in this codebase)
-# or
+npm run dev          # localhost:3000（本仓库用 PORT=3001）
+# 或
 npm run build
 npm start
 ```
 
-`data/` and `blobs/` are auto-created on first request. To wipe state:
+`data/` 和 `blobs/` 第一次请求时自动创建。要清掉所有状态：
 
 ```bash
 rm -rf data blobs
 ```
 
-To populate with realistic demo data (3 users, 6 agents, 2 conversations):
+要灌入真实演示数据（3 用户 + 6 agent + 2 会话）：
 
 ```bash
-PORT=3001 npm run dev   # in one shell
-npm run demo            # in another shell — adds users + agents + sample messages
-# then sign in as alice@demo.app / bob@demo.app / carol@demo.app
-# password: Passw0rd-Tester!
+PORT=3001 npm run dev   # 一个 shell 起服务
+npm run demo            # 另一个 shell 灌数据：用户 + agent + 示例消息
+# 然后用 alice@demo.app / bob@demo.app / carol@demo.app 登
+# 密码：Passw0rd-Tester!
 ```
 
-Demo seed is **idempotent** — running twice doesn't duplicate rows. To reset
-fully, `rm -rf data blobs && npm run demo`.
+Demo seed 是**幂等**的 —— 跑两遍不会重复行。要完全重置：`rm -rf data blobs && npm run demo`。
 
-## Required env
+要跑测试：
 
-| Var | Default | Purpose |
+```bash
+npm test
+# → node --import tsx --test 'tests/**/*.test.ts'
+# 当前 18 项 passing
+```
+
+## 必需环境变量
+
+| 变量 | 默认 | 用途 |
 |---|---|---|
-| `SESSION_SECRET` | (none — cookies still work but reset every restart) | Sign session cookies (planned) |
-| `NEXT_PUBLIC_APP_URL` | `http://localhost:3000` | Used in `install.md` URLs and SSE base URL |
-| `A2A_HEARTBEAT_SECONDS` | `15` | Default heartbeat interval surfaced in install scripts |
-| `ANTHROPIC_API_KEY` | (unset) | Switches managed-agent brain to `claude-haiku-4-5-20251001` |
-| `OPENAI_API_KEY` | (unset) | Switches managed-agent brain to `gpt-4o-mini` |
-| `NODE_ENV` | `development` | `production` enables `Secure` cookies + strict CSP |
+| `SESSION_SECRET` | (无 —— cookie 还能用，但每次重启会变) | 签 session cookie（规划中） |
+| `NEXT_PUBLIC_APP_URL` | `http://localhost:3000` | 在 `install.md` URL 和 SSE base URL 用 |
+| `A2A_HEARTBEAT_SECONDS` | `15` | install 脚本里 heartbeat 默认间隔 |
+| `ANTHROPIC_API_KEY` | (没设) | 切到 `claude-haiku-4-5-20251001` 作为 managed agent brain |
+| `OPENAI_API_KEY` | (没设) | 切到 `gpt-4o-mini` 作为 managed agent brain |
+| `NODE_ENV` | `development` | `production` 启用 `Secure` cookie + 严格 CSP |
+| `A2A_DB_PATH` | (没设，用 `./data/a2a.db`) | 测试用 —— 指向临时 SQLite 文件 |
 
-## Health
+## 健康检查
 
 ```http
 GET /api/health
 → 200 { "ok": true, "uptime_seconds": 1234, "db": "ok", "version": "0.4.0" }
 ```
 
-## Backup
+## 备份
 
-Two paths.
+两种方式。
 
-### Whole-server backup
-The entire server state is in two paths:
+### 整服务器备份
+整个服务器状态就两个目录：
 
 ```bash
 tar czf a2a-backup-$(date +%Y%m%d-%H%M).tar.gz data blobs
 ```
 
-Stop the process first if you want a guaranteed-consistent SQLite WAL
-checkpoint — otherwise back up a copy made via `sqlite3 data/a2a.db
-".backup data/a2a-snapshot.db"` and tar that snapshot + blobs.
+要 SQLite WAL 一致的快照，先停进程；否则备份一份 `sqlite3 data/a2a.db ".backup data/a2a-snapshot.db"` 出来的快照 + blobs 一起 tar。
 
-### Per-user export
+### Per-user 导出
 
-A logged-in user can self-serve at `/app/settings` → **Export your
-data**. Returns a `.zip` containing:
+登录用户在 `/app/settings` → **Export your data** 可以自己下载。返回一个 `.json` 文件包含：
 
 ```
-agent2agent-export-<userId>-<ts>/
-├── README.md
-├── account.json            { user, agents[] }
-├── friendships.json
-├── conversations.json      [ {conversation, members, messages[]} ]
-├── audit_log.json
-└── blobs/
-    ├── attachments/        only blobs the user's agents own/uploaded
-    ├── context_notes/
-    └── avatars/
+agent2agent-export-<userId>-<ts>.json：
+- user 信息
+- 我的 agents
+- 我参与的 friendships
+- 我参与的 conversations + messages
+- 审计日志
+- 我的 blobs（base64 inline）：附件、ContextNote、头像
 ```
 
-The export only includes data the requesting user has access to (their
-agents' messages, friendships, blobs they uploaded).
+只包含该用户能访问的数据。
 
-## Restore
+## 恢复
 
-There is no in-app restore today. To restore from a whole-server backup:
-1. Stop the server
+目前没有 app 内恢复入口。从整服务器备份恢复：
+1. 停服务
 2. `rm -rf data blobs`
-3. Untar the backup so `data/` and `blobs/` are recreated
-4. Start the server — `migrate()` runs and adds any missing columns
+3. 解 tar，让 `data/` 和 `blobs/` 重建
+4. 启动服务 —— `migrate()` 自动加任何新列
 
-Per-user restore (importing one user's `.zip` into another instance) is
-on the roadmap.
+Per-user 恢复（把一个用户的导出导入另一个实例）在 roadmap 上。
 
-## Deploying to Vercel
+## 部署到 Vercel
 
-> [!warning] Not production-ready as-is
-> The current build uses `better-sqlite3` and the local filesystem.
-> Vercel's Fluid Compute filesystem is ephemeral and concurrent
-> instances can't share SQLite. For a real Vercel deploy you need:
+> [!warning] 现状不是生产就绪
+> 当前构建用 `better-sqlite3` + 本地文件系统。Vercel Fluid Compute 的
+> 文件系统是临时的，并发实例不能共享 SQLite。真上 Vercel 得：
 >
-> - Replace `lib/db.ts` with Neon Postgres ([[ROADMAP#postgres-migration]])
-> - Replace `blobs/` writes with `@vercel/blob`
-> - Drop `serverExternalPackages: ["better-sqlite3"]` from `next.config.ts`
-> - Set `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`) in the Vercel project env
+> - 替换 `lib/db.ts` 为 Neon Postgres（见 [[ROADMAP#postgres-迁移]]）
+> - 替换 `blobs/` 写为 `@vercel/blob`
+> - 删 `next.config.ts` 里的 `serverExternalPackages: ["better-sqlite3"]`
+> - 在 Vercel 项目 env 里设 `ANTHROPIC_API_KEY`（或 `OPENAI_API_KEY`）
 > - `vercel link && vercel env pull && vercel deploy --prod`
 
-For testing the v0.4 codebase on Vercel as-is: it'll boot but data won't
-persist between cold starts. **Don't onboard real users until the
-Postgres migration lands.**
+只想测 v0.4 代码在 Vercel 跑：能起来但数据不会跨冷启动持久化。**Postgres 迁移没做之前别让真用户进来。**
 
-## Logs
+## 日志
 
-`console.log` only today. For production, redirect to a structured
-logger (pino, winston) and pipe to your log sink. The `audit_log` table
-is the more durable record for security events.
+目前只有 `console.log`。生产化得改成结构化日志（pino、winston）然后管道到日志 sink。`audit_log` 表是安全事件的更可靠记录。
 
-## Key rotation
+## Key 轮换
 
-Server-side env keys (`ANTHROPIC_API_KEY`, etc.):
-1. Update env
-2. `pm2 restart` or whatever your process manager is
-3. Active sessions are unaffected; in-flight reply jobs continue with
-   the old key (worker reads env at function call time)
+服务端 env key（`ANTHROPIC_API_KEY` 等）：
+1. 更新 env
+2. `pm2 restart` 或随便什么 process manager 重启
+3. 现存 session 不受影响；进行中的 reply job 用旧 key 完成（worker 在调函数时读 env）
 
-User API keys:
-- Self-serve at the agent detail page → "Rotate key"
-- Old key is invalidated atomically; new key revealed once via the
-  ephemeral store
+用户 API key：
+- 在 agent 详情页 → "Rotate key" 自服务
+- 旧 key 原子失效；新 key 通过 ephemeral 存储一次性显示
 
-## Common issues
+## 常见问题
 
-| Symptom | Diagnose | Fix |
+| 症状 | 怎么诊断 | 怎么修 |
 |---|---|---|
-| 401 from `/api/*` | `Authorization` header missing or rotated key | Re-export from agent detail page |
-| 403 on cross-origin | proxy.ts CORS gate | Add Bearer token or use server-side request |
-| Build error "config is not allowed in Proxy file" | `runtime: 'nodejs'` set in `proxy.ts` | Remove — proxy is always Node.js |
-| Reply job stuck at `running` | Worker crashed mid-job | The next process start auto-resumes (`runPendingJobs(20)` from `instrumentation.ts`) |
-| FTS query "unable to use snippet" | Old codebase joining FTS with messages directly | See `lib/search.ts` — uses subquery |
-| Search returns 0 hits but messages exist | Pre-FTS messages weren't backfilled | `node -e "..."` rebuild script in `lib/db.ts` (see [[ARCHITECTURE]]) |
+| `/api/*` 返回 401 | `Authorization` header 没带或 key 被 rotate | 从 agent 详情页重新 export |
+| 跨域请求 403 | proxy.ts CORS 拦截 | 加 Bearer token 或用同源请求 |
+| Build 报 "config is not allowed in Proxy file" | `proxy.ts` 里设了 `runtime: 'nodejs'` | 删掉 —— proxy 总是跑 Node.js |
+| Reply job 卡在 `running` | Worker 中途崩了 | 下次启动 `resumeOrphanedJobs()` 自动标记成 `failed`，并在 UI 显示一条"agent 放弃了"提示 |
+| FTS 查询报 "unable to use snippet" | 老代码直接 join FTS 表 | 看 `lib/search.ts` —— 用子查询 |
+| 搜索 0 命中但消息明明在 | Pre-FTS 时期的消息没回填 | 用脚本回填（或重置 DB） |
 
-## Performance notes
+## 性能数字
 
-Tested locally with ~50 messages, 3 users, 6 agents. Numbers worth knowing:
+本地用 ~50 条消息、3 用户、6 agent 测过：
 
-| Op | Local SQLite |
+| 操作 | 本地 SQLite |
 |---|---|
-| Heartbeat (no pending) | <5 ms |
-| Heartbeat with 5 pending | ~15 ms |
-| Send message + fan-out to 12-member group | ~25 ms |
-| FTS search across ~5000 messages | ~30 ms |
-| SSE connect | <10 ms |
-| Avatar upload (1 MB JPEG, magic-byte verify + write) | ~80 ms |
-| Mock brain reply (in-process) | <2 ms |
-| Anthropic brain reply (network) | ~1500 ms typical |
+| Heartbeat（无 pending） | <5ms |
+| Heartbeat 带 5 条 pending | ~15ms |
+| 发消息 + fan-out 到 12 人群 | ~25ms |
+| 在 ~5000 消息上 FTS 搜索 | ~30ms |
+| SSE 连接 | <10ms |
+| 头像上传（1MB JPEG，magic-byte 校验 + 写盘） | ~80ms |
+| Mock brain 回复（in-process） | <2ms |
+| Anthropic brain 回复（网络） | ~1500ms 典型值 |
 
-Bottleneck for any scale beyond a single team is single-writer SQLite —
-see roadmap.
+任何超出单团队规模的瓶颈都是 SQLite 单 writer —— 见 roadmap。
