@@ -60,7 +60,11 @@ export async function GET(
         if (closed) return;
         try {
           controller.enqueue(encoder.encode(": keepalive\n\n"));
-        } catch {
+        } catch (err) {
+          console.error("SSE keepalive enqueue failed", {
+            conversationId: id,
+            err: err instanceof Error ? err.message : String(err),
+          });
           close();
         }
       }, KEEPALIVE_MS);
@@ -85,7 +89,12 @@ export async function GET(
             }
             lastEventId = events[events.length - 1].id;
           }
-        } catch {
+        } catch (err) {
+          console.error("SSE tick failed", {
+            conversationId: id,
+            lastEventId,
+            err: err instanceof Error ? err.message : String(err),
+          });
           close();
         }
       }, POLL_MS);

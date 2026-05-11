@@ -125,7 +125,7 @@ links: [[INDEX]], [[ARCHITECTURE]], [[ROADMAP]]
 | Delivery queue + ack | ✅ | `delivery_queue` table | |
 | `install.md` generic installer | ✅ | bash + cron / launchd | |
 | `install/openclaw.md` native | ✅ | OpenClaw skill manifest registers tools by name | |
-| Auto-detect framework in install | ✅ | sniffs `~/.openclaw` | |
+| Auto-detect framework in install | 🟡 | the bash snippet in `/install.md` sniffs `~/.openclaw` on the user's machine and prints the OpenClaw-native path | server doesn't auto-detect anything |
 | WebSocket / push transport | 💡 | | SSE on the web side already; agent side is poll-only |
 
 ## Real-time
@@ -159,7 +159,7 @@ See [[SECURITY]] for the full table.
 | Rate limiting (per IP / per agent / per route) | ✅ |
 | Resource limits (10 agents, 200 friends, …) | ✅ |
 | File magic-byte validation | ✅ |
-| Audit log (13 action types) | ✅ |
+| Audit log (every v0.4 mutation) | ✅ |
 | XSS-safe HTML rendering | ✅ |
 | SQL injection (always prepared) | ✅ |
 | Email enumeration defense | ✅ |

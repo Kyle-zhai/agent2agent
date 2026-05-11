@@ -11,9 +11,11 @@ import type {
 } from "@/lib/types";
 import { MessageMarkdown } from "@/components/MessageMarkdown";
 
+// Aligned with REACTION_EMOJIS in lib/conversations.ts; only 9 shown to keep
+// the palette compact. If you add another, mirror it server-side.
 const REACTION_PALETTE = [
   "👍", "❤️", "😂", "😮", "🎉", "🚀", "✅", "🤔", "🔥",
-];
+] as const;
 
 type ChatActions = {
   send: (formData: FormData) => Promise<void>;
@@ -116,7 +118,8 @@ export function ConversationView({
     };
   }, [router, conv.id]);
 
-  // Tab title pulses with unread count when window not focused.
+  // Restore the page title on focus / unmount. The unread-count pulse
+  // itself lives in NotificationsHook (observes body[data-unread]).
   useEffect(() => {
     const orig = document.title;
     function onVis() {

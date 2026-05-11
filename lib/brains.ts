@@ -14,20 +14,34 @@ export type BrainOutput = {
   thinking: string;
 };
 
+const VALID_PROVIDERS: readonly BrainProvider[] = ["mock", "anthropic", "openai"];
+
 export function parseBrainConfig(raw: string | undefined): BrainConfig {
   if (!raw) return defaultBrainConfig();
+  let parsed: { provider?: unknown; model?: string; temperature?: number; max_history?: number; reply_to_self?: boolean };
   try {
-    const parsed = JSON.parse(raw);
-    return {
-      provider: (parsed.provider ?? "mock") as BrainProvider,
-      model: parsed.model,
-      temperature: parsed.temperature,
-      max_history: parsed.max_history ?? 24,
-      reply_to_self: parsed.reply_to_self ?? false,
-    };
-  } catch {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    console.warn("brain_config_json invalid, falling back to defaults", {
+      raw: raw.slice(0, 100),
+      err: err instanceof Error ? err.message : String(err),
+    });
     return defaultBrainConfig();
   }
+  // Validate the provider — a cast lies if a config has an unknown value
+  // (e.g. saved from a future version). Fall back to default instead.
+  const provider: BrainProvider = VALID_PROVIDERS.includes(
+    parsed.provider as BrainProvider,
+  )
+    ? (parsed.provider as BrainProvider)
+    : defaultBrainConfig().provider;
+  return {
+    provider,
+    model: parsed.model,
+    temperature: parsed.temperature,
+    max_history: parsed.max_history ?? 24,
+    reply_to_self: parsed.reply_to_self ?? false,
+  };
 }
 
 export function defaultBrainConfig(): BrainConfig {
@@ -329,10 +343,21 @@ async function callAnthropic(
     const err = await res.text();
     throw new Error(`Anthropic API ${res.status}: ${err.slice(0, 200)}`);
   }
-  const data = (await res.json()) as {
-    content?: Array<{ type: string; text?: string }>;
-  };
+  let data: { content?: Array<{ type: string; text?: string }>; error?: { message?: string } };
+  try {
+    data = (await res.json()) as typeof data;
+  } catch (err) {
+    throw new Error(
+      `Anthropic 200 but body not JSON: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  if (data.error) {
+    throw new Error(`Anthropic returned 200 with error body: ${data.error.message ?? "unknown"}`);
+  }
   const raw = data.content?.find((c) => c.type === "text")?.text ?? "";
+  if (!raw) {
+    throw new Error(`Anthropic returned no text content (200 OK, empty)`);
+  }
   return splitThinking(raw);
 }
 
@@ -368,10 +393,18 @@ async function callOpenAI(
     const err = await res.text();
     throw new Error(`OpenAI API ${res.status}: ${err.slice(0, 200)}`);
   }
-  const data = (await res.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
-  };
+  let data: { choices?: Array<{ message?: { content?: string } }> };
+  try {
+    data = (await res.json()) as typeof data;
+  } catch (err) {
+    throw new Error(
+      `OpenAI 200 but body not JSON: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
   const raw = data.choices?.[0]?.message?.content ?? "";
+  if (!raw) {
+    throw new Error(`OpenAI returned no message content (200 OK, empty)`);
+  }
   return splitThinking(raw);
 }
 

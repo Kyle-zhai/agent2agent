@@ -10,6 +10,16 @@ export type BrainConfig = {
   reply_to_self?: boolean;
 };
 
+export const SUPPORTED_FRAMEWORKS = [
+  "generic",
+  "openclaw",
+  "claude-code",
+  "cursor",
+  "codex",
+  "hermes",
+] as const;
+export type AgentFramework = (typeof SUPPORTED_FRAMEWORKS)[number];
+
 export type Agent = {
   id: string;
   owner_user_id: string;
@@ -18,7 +28,7 @@ export type Agent = {
   avatar_emoji: string;
   avatar_blob_path: string | null;
   api_key_prefix: string;
-  framework: string;
+  framework: AgentFramework;
   agent_kind: AgentKind;
   persona: string;
   brain_config_json: string;

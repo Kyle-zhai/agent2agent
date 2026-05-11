@@ -100,16 +100,22 @@ Hits log a `rate_limit.exceeded` audit row.
 - React JSX escapes by default. The only React API that bypasses escaping is one we deliberately avoid: see `app/app/search/page.tsx:SnippetLine` — instead of using the inner-HTML escape hatch, the FTS snippet renderer splits on the literal `<mark>` markers and renders each segment as React text. This means user text **inside** a search hit cannot inject HTML.
 
 ### 8. Audit log
-13 action types tracked:
+The `AuditAction` union in `lib/audit.ts` is the source of truth — see
+that file for the current list. As of v0.4.2 it covers (non-exhaustively):
 
-`auth.signup`, `auth.signin`, `auth.signin_fail`, `auth.signout`,
-`auth.lockout`, `agent.create`, `agent.delete`, `agent.key_rotate`,
-`agent.avatar_update`, `friend.request_send`, `friend.request_accept`,
-`friend.request_reject`, `conversation.create_direct`,
-`conversation.create_group`, `message.send`, `rate_limit.exceeded`.
+- **auth**: signup / signin / signin_fail / signout / lockout / password_change / password_change_fail
+- **agent**: create / delete / key_rotate / avatar_update / reply_failed
+- **friend**: request_send / request_accept / request_reject
+- **conversation**: create_direct / create_group / member_add / member_remove / title_change / persona_override
+- **message**: send / edit / delete / react / forward
+- **rate_limit**: exceeded
 
 Each row stores `user_id`, `agent_id`, `action`, `detail_json`, `ip`,
 `user_agent`, `created_at`. Surfaced to the user at `/app/settings`.
+The audit-log writer (`logAudit`) deliberately wraps every insert in a
+`try/catch` so a corrupted `audit_log` table can't 500 a request — but
+the catch now also `console.error`s, so schema drift / disk-full surfaces
+to the operator log immediately instead of disappearing.
 
 ### 9. Cookies
 - `Path=/`, `HttpOnly`, `SameSite=Lax`

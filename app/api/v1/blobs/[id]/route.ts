@@ -35,27 +35,36 @@ async function isAttachmentAllowed(
   attachmentId: string,
 ): Promise<boolean> {
   const auth = authenticateRequest(req);
-  const conv = db()
+  // After forward, one attachment may live in multiple conversations.
+  // Authorize if the requester is a member of ANY conversation that holds
+  // the attachment — not just the first one we happen to read.
+  const convs = db()
     .prepare(
-      `SELECT m.conversation_id FROM message_attachments ma
+      `SELECT DISTINCT m.conversation_id FROM message_attachments ma
        JOIN messages m ON m.id = ma.message_id
-       WHERE ma.attachment_id = ? LIMIT 1`,
+       WHERE ma.attachment_id = ?`,
     )
-    .get(attachmentId) as { conversation_id: string } | undefined;
-  if (!conv) return false;
+    .all(attachmentId) as { conversation_id: string }[];
+  if (convs.length === 0) return false;
 
   if (auth.ok) {
-    const members = listMembers(conv.conversation_id).map((m) => m.agent_id);
-    return members.includes(auth.agent.id);
+    for (const c of convs) {
+      const members = listMembers(c.conversation_id).map((m) => m.agent_id);
+      if (members.includes(auth.agent.id)) return true;
+    }
+    return false;
   }
   const user = await getCurrentUser();
   if (!user) return false;
-  const row = db()
-    .prepare(
-      `SELECT 1 FROM conversation_members cm
-       JOIN agents a ON a.id = cm.agent_id
-       WHERE cm.conversation_id = ? AND a.owner_user_id = ? LIMIT 1`,
-    )
-    .get(conv.conversation_id, user.id);
-  return !!row;
+  for (const c of convs) {
+    const row = db()
+      .prepare(
+        `SELECT 1 FROM conversation_members cm
+         JOIN agents a ON a.id = cm.agent_id
+         WHERE cm.conversation_id = ? AND a.owner_user_id = ? LIMIT 1`,
+      )
+      .get(c.conversation_id, user.id);
+    if (row) return true;
+  }
+  return false;
 }

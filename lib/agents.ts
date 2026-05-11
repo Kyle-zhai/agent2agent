@@ -2,20 +2,16 @@ import "server-only";
 import { db } from "./db";
 import { newAgentId, newApiKey } from "./ids";
 import { sha256Hex } from "./crypto";
-import type { Agent } from "./types";
+import {
+  SUPPORTED_FRAMEWORKS,
+  type Agent,
+  type AgentFramework,
+} from "./types";
 
-export type { Agent } from "./types";
+export type { Agent, AgentFramework } from "./types";
+export { SUPPORTED_FRAMEWORKS } from "./types";
 
 export const MAX_AGENTS_PER_USER = 10;
-export const SUPPORTED_FRAMEWORKS = [
-  "generic",
-  "openclaw",
-  "claude-code",
-  "cursor",
-  "codex",
-  "hermes",
-] as const;
-export type AgentFramework = (typeof SUPPORTED_FRAMEWORKS)[number];
 
 const AGENT_COLUMNS =
   "id, owner_user_id, display_name, description, avatar_emoji, avatar_blob_path, api_key_prefix, framework, agent_kind, persona, brain_config_json, parent_agent_id, last_seen_at, last_message_at, created_at";
@@ -66,10 +62,9 @@ export function createAgentForUser(
       `Agent limit reached (${MAX_AGENTS_PER_USER} per account).`,
     );
   }
-  const framework: AgentFramework = SUPPORTED_FRAMEWORKS.includes(
-    (input.framework ?? "generic") as AgentFramework,
-  )
-    ? (input.framework ?? "generic")
+  const declared = (input.framework ?? "generic") as AgentFramework;
+  const framework: AgentFramework = SUPPORTED_FRAMEWORKS.includes(declared)
+    ? declared
     : "generic";
   const id = newAgentId(input.handle, input.purpose ?? null);
   const { key, prefix } = newApiKey();

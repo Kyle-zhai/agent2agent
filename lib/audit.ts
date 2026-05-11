@@ -11,16 +11,27 @@ export type AuditAction =
   | "auth.signin_fail"
   | "auth.signout"
   | "auth.lockout"
+  | "auth.password_change"
+  | "auth.password_change_fail"
   | "agent.create"
   | "agent.delete"
   | "agent.key_rotate"
   | "agent.avatar_update"
+  | "agent.reply_failed"
   | "friend.request_send"
   | "friend.request_accept"
   | "friend.request_reject"
   | "conversation.create_direct"
   | "conversation.create_group"
+  | "conversation.persona_override"
+  | "conversation.member_add"
+  | "conversation.member_remove"
+  | "conversation.title_change"
   | "message.send"
+  | "message.edit"
+  | "message.delete"
+  | "message.react"
+  | "message.forward"
   | "rate_limit.exceeded";
 
 export type AuditContext = {
@@ -49,8 +60,14 @@ export function logAudit(action: AuditAction, ctx: AuditContext = {}): void {
         ctx.userAgent ?? null,
         Date.now(),
       );
-  } catch {
-    // Audit must never break the request path.
+  } catch (err) {
+    // Audit must never break the request path — but a failure to write the
+    // security trail is itself a security concern. Surface it at minimum to
+    // stderr so the operator notices schema drift / disk-full immediately.
+    console.error("logAudit failed (request continued)", {
+      action,
+      err: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 

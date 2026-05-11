@@ -257,9 +257,30 @@ async function forwardAction(formData: FormData) {
   const messageId = String(formData.get("message_id") ?? "");
   const targetConvId = String(formData.get("target_conversation_id") ?? "");
   const sourceConvId = String(formData.get("conversation_id") ?? "");
-  const { myAgentId } = requireUserMember(sourceConvId, user.id);
+  const { myAgentId: sourceAgentId } = requireUserMember(sourceConvId, user.id);
+  // The user may be in target conv via a DIFFERENT agent.
+  let targetAgentId: string;
   try {
-    forwardMessage(messageId, targetConvId, myAgentId);
+    targetAgentId = requireUserMember(targetConvId, user.id).myAgentId;
+  } catch {
+    redirect(
+      `/app/c/${sourceConvId}?error=${encodeURIComponent(
+        "You're not in that target conversation.",
+      )}`,
+    );
+  }
+  try {
+    forwardMessage(messageId, targetConvId, sourceAgentId, targetAgentId);
+    const { logAudit } = await import("@/lib/audit");
+    logAudit("message.forward", {
+      userId: user.id,
+      agentId: targetAgentId,
+      detail: {
+        message_id: messageId,
+        from_conversation_id: sourceConvId,
+        to_conversation_id: targetConvId,
+      },
+    });
   } catch (err) {
     redirect(
       `/app/c/${sourceConvId}?error=${encodeURIComponent(

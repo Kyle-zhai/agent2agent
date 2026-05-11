@@ -29,7 +29,7 @@ export type ManagedPersonaTemplate = {
   persona: string;
 };
 
-export const PERSONA_TEMPLATES: ManagedPersonaTemplate[] = [
+export const PERSONA_TEMPLATES = [
   {
     key: "openclaw-coding",
     display_name: "OpenClaw Coder",
@@ -69,7 +69,9 @@ export const PERSONA_TEMPLATES: ManagedPersonaTemplate[] = [
     description: "Start from scratch — define your own persona.",
     persona: "",
   },
-];
+] as const satisfies readonly ManagedPersonaTemplate[];
+
+export type PersonaTemplateKey = (typeof PERSONA_TEMPLATES)[number]["key"];
 
 export function spawnManagedAgent(
   userId: string,
@@ -224,7 +226,9 @@ export function enqueueRepliesForMessage(
     const a = getAgent(mid);
     if (!a || a.agent_kind !== "managed") continue;
     const cfg = parseBrainConfig(a.brain_config_json);
-    if (a.id === fromAgentId && !cfg.reply_to_self) continue;
+    // Dead branch: the `mid === fromAgentId` early-continue above already
+    // skips self. Kept as a no-op for now in case reply_to_self gets wired
+    // up by removing that earlier skip.
 
     const isMentioned = mentionedIds.has(mid);
     const cutoff = Date.now() - 60_000;
@@ -237,9 +241,23 @@ export function enqueueRepliesForMessage(
         )
         .get(conversationId, mid, cutoff) as { n: number }
     ).n;
-    // Mentioned agents get one free reply past the cooldown — that's the
-    // whole point of @mention.
-    if (recent >= PER_AGENT_PER_MINUTE_CAP && !isMentioned) continue;
+    // @mention lifts the standard 4/min cap to 2× — humans can still cut
+    // through autonomous chatter, but agents @-spamming each other can't
+    // ping-pong forever.
+    const cap = isMentioned
+      ? PER_AGENT_PER_MINUTE_CAP * 2
+      : PER_AGENT_PER_MINUTE_CAP;
+    if (recent >= cap) continue;
+    // Bonus: when @mentioned, only honor mentions originating from a
+    // non-managed (human-driven) agent. Mentions between managed agents
+    // don't bypass the standard cap.
+    if (
+      isMentioned &&
+      recent >= PER_AGENT_PER_MINUTE_CAP
+    ) {
+      const sender = getAgent(fromAgentId);
+      if (!sender || sender.agent_kind === "managed") continue;
+    }
 
     db()
       .prepare(
@@ -249,9 +267,14 @@ export function enqueueRepliesForMessage(
       )
       .run(`job_${jobId()}`, conversationId, mid, triggerMessageId, Date.now());
   }
-  // Kick the worker without blocking the caller.
+  // Kick the worker without blocking the caller. A bare `void` would
+  // discard rejection diagnostics — surface to stderr instead.
   setImmediate(() => {
-    void runPendingJobs();
+    runPendingJobs().catch((err) => {
+      console.error("runPendingJobs worker crashed", {
+        err: err instanceof Error ? err.message : String(err),
+      });
+    });
   });
 }
 
@@ -354,6 +377,52 @@ async function processJob(job: {
          last_error = ? WHERE id = ?`,
       )
       .run(Date.now(), msg.slice(0, 280), job.id);
+    console.error("reply_job failed", {
+      jobId: job.id,
+      agentId: job.agent_id,
+      conversationId: job.conversation_id,
+      err: msg,
+    });
+    try {
+      // Audit + SSE so the typing indicator stops AND the operator + user
+      // see that the agent gave up rather than waiting forever.
+      const { logAudit } = await import("./audit");
+      logAudit("agent.reply_failed", {
+        agentId: job.agent_id,
+        detail: {
+          conversation_id: job.conversation_id,
+          trigger_message_id: job.trigger_message_id,
+          error: msg.slice(0, 200),
+        },
+      });
+      db()
+        .prepare(
+          `INSERT INTO conversation_events (conversation_id, kind, message_id, created_at)
+           VALUES (?, 'reply_failed', ?, ?)`,
+        )
+        .run(job.conversation_id, job.trigger_message_id, Date.now());
+    } catch {
+      // The audit/event side effect mustn't break the worker.
+    }
+  }
+}
+
+export function resumeOrphanedJobs(): void {
+  // Anything left in 'running' from a prior process restart is unrecoverable
+  // — mark it failed so the typing indicator clears and the worker doesn't
+  // permanently believe an agent is mid-reply.
+  const now = Date.now();
+  const result = db()
+    .prepare(
+      `UPDATE reply_jobs SET status = 'failed', finished_at = ?,
+       last_error = 'orphaned: server restarted'
+       WHERE status = 'running'`,
+    )
+    .run(now);
+  if (result.changes > 0) {
+    console.warn(
+      `reply_jobs: marked ${result.changes} orphaned 'running' jobs as failed on startup`,
+    );
   }
 }
 

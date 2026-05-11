@@ -58,7 +58,11 @@ export default function proxy(req: NextRequest): NextResponse {
       if (!/^Bearer\s+a2a_/.test(auth)) {
         return new NextResponse("Forbidden", { status: 403 });
       }
-      // Allow tools/curl with Bearer; never reflect Origin for cookie-bearing requests.
+      // Cross-origin + Bearer auth: the request is from a script/agent, not
+      // a browser session. We never reach this line if the Bearer regex
+      // above failed (returned 403). Cookies are stripped here by
+      // SameSite=Lax on the way in, so reflecting Origin only helps curl /
+      // SDKs and cannot enable CSRF (no credentials would attach).
       res.headers.set("Access-Control-Allow-Origin", origin);
       res.headers.set("Vary", "Origin");
     }

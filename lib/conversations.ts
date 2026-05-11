@@ -12,6 +12,7 @@ import {
 import { getAgent, getAgentOwnedBy, getAgentsByIds } from "./agents";
 import { areFriends } from "./friends";
 import { validateFileBytes } from "./file-validation";
+import { logAudit } from "./audit";
 import type {
   Attachment,
   ContextNote,
@@ -544,8 +545,16 @@ export function sendMessage(
   for (const hook of afterMessageHooks) {
     try {
       hook(conversationId, id, fromAgentId);
-    } catch {
-      // hooks must not break the send path
+    } catch (err) {
+      // best-effort: notification + reply-job hooks fail loud-ish to the
+      // server log but never roll back the message insert. If they vanish
+      // silently the user's message would still post but nothing downstream
+      // would react.
+      console.error("afterMessageHook failed", {
+        conversationId,
+        messageId: id,
+        err: err instanceof Error ? err.message : String(err),
+      });
     }
   }
   return getMessageWithRelations(id)!;
@@ -611,7 +620,8 @@ export function editMessage(
   }
   if (m.deleted_at) throw new Error("Cannot edit a deleted message.");
   if (Date.now() - m.created_at > EDIT_DELETE_WINDOW_MS) {
-    throw new Error("Edit window has passed (5 minutes).");
+    const windowMinutes = Math.round(EDIT_DELETE_WINDOW_MS / 60000);
+    throw new Error(`Edit window has passed (${windowMinutes} minutes).`);
   }
   const text = newText.trim().slice(0, MAX_TEXT_LENGTH);
   const now = Date.now();
@@ -637,23 +647,28 @@ export function editMessage(
        VALUES (?, 'edit', ?, ?)`,
     )
     .run(m.conversation_id, messageId, now);
+  logAudit("message.edit", {
+    agentId: fromAgentId,
+    detail: { message_id: messageId, conversation_id: m.conversation_id },
+  });
   return { ...m, text, edited_at: now };
 }
 
 export function forwardMessage(
   sourceMessageId: string,
   targetConversationId: string,
-  byAgentId: string,
+  sourceByAgentId: string,
+  targetByAgentId: string,
 ): MessageWithRelations {
   const src = db()
     .prepare("SELECT * FROM messages WHERE id = ?")
     .get(sourceMessageId) as Message | undefined;
   if (!src) throw new Error("Source message not found.");
   if (src.deleted_at) throw new Error("Cannot forward a deleted message.");
-  if (!isMember(src.conversation_id, byAgentId)) {
+  if (!isMember(src.conversation_id, sourceByAgentId)) {
     throw new Error("Not a member of source conversation.");
   }
-  if (!isMember(targetConversationId, byAgentId)) {
+  if (!isMember(targetConversationId, targetByAgentId)) {
     throw new Error("Not a member of target conversation.");
   }
   if (src.conversation_id === targetConversationId) {
@@ -668,15 +683,10 @@ export function forwardMessage(
   const fromAgent = db()
     .prepare("SELECT display_name FROM agents WHERE id = ?")
     .get(src.from_agent_id) as { display_name: string } | undefined;
-  const when = new Date(src.created_at).toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZone: "UTC",
-  });
+  // Render time in ISO so the recipient's UI can re-format in their tz.
+  const when = new Date(src.created_at).toISOString();
   const text = `↪ Forwarded from ${fromAgent?.display_name ?? src.from_agent_id} (${when}):\n${src.text}`;
-  return sendMessage(targetConversationId, byAgentId, {
+  return sendMessage(targetConversationId, targetByAgentId, {
     text,
     attachment_ids: atts.map((a) => a.attachment_id),
     kind: "normal",
@@ -695,8 +705,9 @@ export function deleteMessage(
     throw new Error("Can only delete your own messages.");
   }
   if (m.deleted_at) return m;
+  const windowMinutes = Math.round(EDIT_DELETE_WINDOW_MS / 60000);
   if (Date.now() - m.created_at > EDIT_DELETE_WINDOW_MS) {
-    throw new Error("Delete window has passed (5 minutes).");
+    throw new Error(`Delete window has passed (${windowMinutes} minutes).`);
   }
   const now = Date.now();
   db()
@@ -705,12 +716,19 @@ export function deleteMessage(
     )
     .run(now, messageId);
   db().prepare(`DELETE FROM messages_fts WHERE message_id = ?`).run(messageId);
+  // Reactions on tombstoned messages would imply some user reacted to nothing.
+  // Drop them so the bubble stops carrying counts after delete.
+  db().prepare(`DELETE FROM message_reactions WHERE message_id = ?`).run(messageId);
   db()
     .prepare(
       `INSERT INTO conversation_events (conversation_id, kind, message_id, created_at)
        VALUES (?, 'delete', ?, ?)`,
     )
     .run(m.conversation_id, messageId, now);
+  logAudit("message.delete", {
+    agentId: fromAgentId,
+    detail: { message_id: messageId, conversation_id: m.conversation_id },
+  });
   return { ...m, text: "", thinking: "", deleted_at: now };
 }
 
@@ -742,9 +760,11 @@ export function listReactions(messageIds: string[]): Map<string, ReactionAggrega
   return out;
 }
 
-const ALLOWED_REACTIONS = new Set([
+export const REACTION_EMOJIS = [
   "👍", "👎", "❤️", "😂", "😮", "😢", "🎉", "🚀", "✅", "❌", "🤔", "🔥",
-]);
+] as const;
+export type ReactionEmoji = (typeof REACTION_EMOJIS)[number];
+const ALLOWED_REACTIONS = new Set<string>(REACTION_EMOJIS);
 
 export function toggleReaction(
   messageId: string,
@@ -755,9 +775,14 @@ export function toggleReaction(
     throw new Error("Reaction emoji not allowed.");
   }
   const m = db()
-    .prepare("SELECT conversation_id FROM messages WHERE id = ?")
-    .get(messageId) as { conversation_id: string } | undefined;
+    .prepare(
+      "SELECT conversation_id, deleted_at FROM messages WHERE id = ?",
+    )
+    .get(messageId) as
+    | { conversation_id: string; deleted_at: number | null }
+    | undefined;
   if (!m) throw new Error("Message not found.");
+  if (m.deleted_at) throw new Error("Cannot react to a deleted message.");
   if (!isMember(m.conversation_id, agentId)) {
     throw new Error("Not a member of that conversation.");
   }
@@ -789,6 +814,15 @@ export function toggleReaction(
        VALUES (?, 'reaction', ?, ?)`,
     )
     .run(m.conversation_id, messageId, now);
+  logAudit("message.react", {
+    agentId,
+    detail: {
+      message_id: messageId,
+      conversation_id: m.conversation_id,
+      emoji,
+      added: !existing,
+    },
+  });
   return { added: !existing };
 }
 
@@ -856,6 +890,10 @@ export function setGroupTitle(
        VALUES (?, 'title', ?)`,
     )
     .run(conversationId, Date.now());
+  logAudit("conversation.title_change", {
+    agentId: byAgentId,
+    detail: { conversation_id: conversationId, title: t },
+  });
 }
 
 export function addGroupMember(
@@ -901,6 +939,10 @@ export function addGroupMember(
        VALUES (?, 'member_added', ?)`,
     )
     .run(conversationId, now);
+  logAudit("conversation.member_add", {
+    agentId: byAgentId,
+    detail: { conversation_id: conversationId, added: newMemberId },
+  });
 }
 
 export function removeGroupMember(
@@ -931,6 +973,14 @@ export function removeGroupMember(
        VALUES (?, 'member_removed', ?)`,
     )
     .run(conversationId, Date.now());
+  logAudit("conversation.member_remove", {
+    agentId: byAgentId,
+    detail: {
+      conversation_id: conversationId,
+      removed: removeAgentId,
+      kind: byAgentId === removeAgentId ? "leave" : "kick",
+    },
+  });
 }
 
 export function listConversationsWithState(userId: string): Array<{
@@ -1037,6 +1087,10 @@ export function setPersonaOverride(
          WHERE conversation_id = ? AND agent_id = ?`,
       )
       .run(conversationId, agentId);
+    logAudit("conversation.persona_override", {
+      agentId,
+      detail: { conversation_id: conversationId, action: "cleared" },
+    });
     return;
   }
   db()
@@ -1047,6 +1101,14 @@ export function setPersonaOverride(
          persona = excluded.persona, updated_at = excluded.updated_at`,
     )
     .run(conversationId, agentId, trimmed, now);
+  logAudit("conversation.persona_override", {
+    agentId,
+    detail: {
+      conversation_id: conversationId,
+      action: "set",
+      length: trimmed.length,
+    },
+  });
 }
 
 export function listRunningReplyJobsForConversation(

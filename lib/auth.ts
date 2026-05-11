@@ -200,11 +200,11 @@ export async function changePassword(
     | undefined;
   if (!row) throw new Error("User not found.");
   if (!verifyPassword(oldPassword, row.password_hash, row.password_salt)) {
-    logAudit("auth.signin_fail", {
+    logAudit("auth.password_change_fail", {
       userId,
       ip: fp.ip,
       userAgent: fp.ua,
-      detail: { reason: "password_change_old_wrong" },
+      detail: { reason: "old_password_incorrect" },
     });
     throw new Error("Current password is incorrect.");
   }
@@ -226,11 +226,10 @@ export async function changePassword(
       .prepare("DELETE FROM sessions WHERE user_id = ? AND id != ?")
       .run(userId, currentSid);
   }
-  logAudit("auth.signin", {
+  logAudit("auth.password_change", {
     userId,
     ip: fp.ip,
     userAgent: fp.ua,
-    detail: { event: "password_changed" },
   });
 }
 

@@ -53,9 +53,14 @@ export function setAgentAvatarFromUpload(
   const a = getAgentOwnedBy(agentId, userId);
   if (!a) throw new Error("Agent not found.");
   const result = saveAvatarBytes(`agent_${agentId}`, bytes, declaredMime);
-  db()
+  const info = db()
     .prepare("UPDATE agents SET avatar_blob_path = ? WHERE id = ?")
     .run(result.blob_path, agentId);
+  if (info.changes === 0) {
+    // Agent was deleted in the gap between the ownership check and the
+    // UPDATE. The blob is now orphaned on disk; leave it for a future GC.
+    throw new Error("Agent disappeared mid-upload.");
+  }
   logAudit("agent.avatar_update", {
     userId,
     agentId,
