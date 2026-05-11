@@ -7,6 +7,7 @@ import {
   getAgentOwnedBy,
   rotateApiKey,
 } from "@/lib/agents";
+import { setAgentAvatarFromUpload, clearAgentAvatar } from "@/lib/avatars";
 import { listFriendsOfAgent } from "@/lib/friends";
 import { CopyButton } from "@/components/CopyButton";
 import { popSecret, stashSecret } from "@/lib/ephemeral";
@@ -19,6 +20,8 @@ async function rotateKeyAction(formData: FormData) {
   const id = String(formData.get("agent_id") ?? "");
   const { agent, apiKey } = rotateApiKey(id, user.id);
   stashSecret(`apikey:${user.id}:${agent.id}`, apiKey);
+  const { logAudit } = await import("@/lib/audit");
+  logAudit("agent.key_rotate", { userId: user.id, agentId: agent.id });
   redirect(`/app/agents/${encodeURIComponent(agent.id)}?reveal=1`);
 }
 
@@ -27,8 +30,54 @@ async function deleteAgentAction(formData: FormData) {
   const user = await requireUser();
   const id = String(formData.get("agent_id") ?? "");
   deleteAgentForUser(id, user.id);
+  const { logAudit } = await import("@/lib/audit");
+  logAudit("agent.delete", { userId: user.id, agentId: id });
   revalidatePath("/app", "layout");
   redirect("/app/agents");
+}
+
+async function uploadAvatarAction(formData: FormData) {
+  "use server";
+  const user = await requireUser();
+  const id = String(formData.get("agent_id") ?? "");
+  const file = formData.get("avatar");
+  if (!(file instanceof File) || file.size === 0) {
+    redirect(
+      `/app/agents/${encodeURIComponent(id)}?err=${encodeURIComponent("Pick a file first.")}`,
+    );
+  }
+  const f = file as File;
+  if (f.size > 1024 * 1024) {
+    redirect(
+      `/app/agents/${encodeURIComponent(id)}?err=${encodeURIComponent("Avatar must be ≤1 MB.")}`,
+    );
+  }
+  try {
+    const bytes = Buffer.from(await f.arrayBuffer());
+    setAgentAvatarFromUpload(
+      id,
+      user.id,
+      bytes,
+      f.type || "application/octet-stream",
+    );
+  } catch (err) {
+    redirect(
+      `/app/agents/${encodeURIComponent(id)}?err=${encodeURIComponent(
+        err instanceof Error ? err.message : "Upload failed.",
+      )}`,
+    );
+  }
+  revalidatePath("/app", "layout");
+  redirect(`/app/agents/${encodeURIComponent(id)}?ok=Avatar+updated`);
+}
+
+async function clearAvatarAction(formData: FormData) {
+  "use server";
+  const user = await requireUser();
+  const id = String(formData.get("agent_id") ?? "");
+  clearAgentAvatar(id, user.id);
+  revalidatePath("/app", "layout");
+  redirect(`/app/agents/${encodeURIComponent(id)}?ok=Avatar+cleared`);
 }
 
 export default async function AgentDetailPage({
@@ -36,11 +85,11 @@ export default async function AgentDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ reveal?: string }>;
+  searchParams: Promise<{ reveal?: string; ok?: string; err?: string }>;
 }) {
   const user = await requireUser();
   const { id } = await params;
-  const { reveal } = await searchParams;
+  const { reveal, ok, err } = await searchParams;
   const decodedId = decodeURIComponent(id);
   const agent = getAgentOwnedBy(decodedId, user.id);
   if (!agent) notFound();
@@ -58,7 +107,7 @@ export default async function AgentDetailPage({
         ← Back to agents
       </Link>
       <header className="mt-4 flex items-start gap-4">
-        <div className="text-5xl">{agent.avatar_emoji}</div>
+        <AgentAvatar agent={agent} />
         <div className="flex-1">
           <h1 className="text-3xl font-semibold tracking-tight">
             {agent.display_name}
@@ -66,6 +115,9 @@ export default async function AgentDetailPage({
           <div className="mt-1 flex items-center gap-2 flex-wrap">
             <code className="kbd">{agent.id}</code>
             <CopyButton value={agent.id} label="Copy ID" />
+            {agent.framework !== "generic" ? (
+              <span className="tag tag-violet">{agent.framework}</span>
+            ) : null}
             {agent.last_seen_at ? (
               <span className="tag tag-green">online</span>
             ) : (
@@ -80,7 +132,46 @@ export default async function AgentDetailPage({
         </div>
       </header>
 
+      {ok ? (
+        <div className="callout callout-green mt-4 text-sm">
+          <span>✓</span>
+          <span>{ok}</span>
+        </div>
+      ) : null}
+      {err ? (
+        <div className="callout callout-amber mt-4 text-sm">
+          <span>⚠️</span>
+          <span>{err}</span>
+        </div>
+      ) : null}
+
       <RevealedKey agent={agent} revealed={revealedKey} />
+
+      <section className="mt-10">
+        <h2 className="text-lg font-semibold">Avatar</h2>
+        <div className="mt-3 surface p-5">
+          <form action={uploadAvatarAction} encType="multipart/form-data" className="flex items-center gap-3 flex-wrap">
+            <input type="hidden" name="agent_id" value={agent.id} />
+            <input
+              type="file"
+              name="avatar"
+              accept="image/png,image/jpeg,image/webp"
+              className="text-sm"
+            />
+            <button type="submit" className="btn btn-secondary">
+              Upload (≤1 MB)
+            </button>
+          </form>
+          {agent.avatar_blob_path ? (
+            <form action={clearAvatarAction} className="mt-3">
+              <input type="hidden" name="agent_id" value={agent.id} />
+              <button type="submit" className="btn btn-ghost btn-sm">
+                Remove avatar (use emoji)
+              </button>
+            </form>
+          ) : null}
+        </div>
+      </section>
 
       <section className="mt-10">
         <h2 className="text-lg font-semibold">Friends ({friends.length})</h2>
@@ -158,6 +249,23 @@ A2A_BASE_URL=${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}`}
       </section>
     </div>
   );
+}
+
+function AgentAvatar({
+  agent,
+}: {
+  agent: { id: string; avatar_emoji: string; avatar_blob_path: string | null };
+}) {
+  if (agent.avatar_blob_path) {
+    return (
+      <img
+        src={`/api/v1/blobs/avatar/${encodeURIComponent(agent.id)}`}
+        alt=""
+        className="w-16 h-16 rounded-xl object-cover border border-[color:var(--color-line)]"
+      />
+    );
+  }
+  return <div className="text-5xl">{agent.avatar_emoji}</div>;
 }
 
 function RevealedKey({

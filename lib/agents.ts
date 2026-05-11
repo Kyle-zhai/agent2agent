@@ -6,11 +6,24 @@ import type { Agent } from "./types";
 
 export type { Agent } from "./types";
 
+export const MAX_AGENTS_PER_USER = 10;
+export const SUPPORTED_FRAMEWORKS = [
+  "generic",
+  "openclaw",
+  "claude-code",
+  "cursor",
+  "codex",
+  "hermes",
+] as const;
+export type AgentFramework = (typeof SUPPORTED_FRAMEWORKS)[number];
+
+const AGENT_COLUMNS =
+  "id, owner_user_id, display_name, description, avatar_emoji, avatar_blob_path, api_key_prefix, framework, last_seen_at, last_message_at, created_at";
+
 export function listAgentsForUser(userId: string): Agent[] {
   return db()
     .prepare(
-      `SELECT id, owner_user_id, display_name, description, avatar_emoji,
-              api_key_prefix, last_seen_at, created_at
+      `SELECT ${AGENT_COLUMNS}
        FROM agents WHERE owner_user_id = ? ORDER BY created_at DESC`,
     )
     .all(userId) as Agent[];
@@ -18,11 +31,7 @@ export function listAgentsForUser(userId: string): Agent[] {
 
 export function getAgent(id: string): Agent | null {
   const row = db()
-    .prepare(
-      `SELECT id, owner_user_id, display_name, description, avatar_emoji,
-              api_key_prefix, last_seen_at, created_at
-       FROM agents WHERE id = ?`,
-    )
+    .prepare(`SELECT ${AGENT_COLUMNS} FROM agents WHERE id = ?`)
     .get(id);
   return (row as Agent) ?? null;
 }
@@ -40,12 +49,28 @@ export function createAgentForUser(
     display_name: string;
     description?: string;
     avatar_emoji?: string;
+    framework?: AgentFramework;
   },
 ): { agent: Agent; apiKey: string } {
   const display = input.display_name.trim();
   if (display.length < 1 || display.length > 60) {
     throw new Error("Display name must be 1-60 characters.");
   }
+  const count = (
+    db()
+      .prepare("SELECT COUNT(*) AS n FROM agents WHERE owner_user_id = ?")
+      .get(userId) as { n: number }
+  ).n;
+  if (count >= MAX_AGENTS_PER_USER) {
+    throw new Error(
+      `Agent limit reached (${MAX_AGENTS_PER_USER} per account).`,
+    );
+  }
+  const framework: AgentFramework = SUPPORTED_FRAMEWORKS.includes(
+    (input.framework ?? "generic") as AgentFramework,
+  )
+    ? (input.framework ?? "generic")
+    : "generic";
   const id = newAgentId(input.handle, input.purpose ?? null);
   const { key, prefix } = newApiKey();
   const keyHash = sha256Hex(key);
@@ -58,10 +83,10 @@ export function createAgentForUser(
       .prepare(
         `INSERT INTO agents
          (id, owner_user_id, display_name, description, avatar_emoji,
-          api_key_hash, api_key_prefix, last_seen_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+          api_key_hash, api_key_prefix, framework, last_seen_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
       )
-      .run(id, userId, display, description, emoji, keyHash, prefix, now);
+      .run(id, userId, display, description, emoji, keyHash, prefix, framework, now);
   } catch (err) {
     if (err instanceof Error && err.message.includes("UNIQUE")) {
       throw new Error(
@@ -100,11 +125,7 @@ export function authenticateAgent(rawKey: string): Agent | null {
   if (!rawKey || !rawKey.startsWith("a2a_")) return null;
   const hash = sha256Hex(rawKey);
   const row = db()
-    .prepare(
-      `SELECT id, owner_user_id, display_name, description, avatar_emoji,
-              api_key_prefix, last_seen_at, created_at
-       FROM agents WHERE api_key_hash = ?`,
-    )
+    .prepare(`SELECT ${AGENT_COLUMNS} FROM agents WHERE api_key_hash = ?`)
     .get(hash);
   if (!row) return null;
   db()
@@ -118,8 +139,7 @@ export function searchAgentsByPrefix(query: string, limit = 10): Agent[] {
   if (q.length < 2) return [];
   return db()
     .prepare(
-      `SELECT id, owner_user_id, display_name, description, avatar_emoji,
-              api_key_prefix, last_seen_at, created_at
+      `SELECT ${AGENT_COLUMNS}
        FROM agents
        WHERE id LIKE ? OR LOWER(display_name) LIKE ?
        ORDER BY id ASC LIMIT ?`,
@@ -132,9 +152,20 @@ export function getAgentsByIds(ids: string[]): Agent[] {
   const placeholders = ids.map(() => "?").join(",");
   return db()
     .prepare(
-      `SELECT id, owner_user_id, display_name, description, avatar_emoji,
-              api_key_prefix, last_seen_at, created_at
+      `SELECT ${AGENT_COLUMNS}
        FROM agents WHERE id IN (${placeholders})`,
     )
     .all(...ids) as Agent[];
+}
+
+export function setAgentAvatar(
+  id: string,
+  userId: string,
+  blobPath: string | null,
+): void {
+  const a = getAgentOwnedBy(id, userId);
+  if (!a) throw new Error("Agent not found.");
+  db()
+    .prepare("UPDATE agents SET avatar_blob_path = ? WHERE id = ?")
+    .run(blobPath, id);
 }

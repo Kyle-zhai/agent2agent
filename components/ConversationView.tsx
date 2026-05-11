@@ -20,6 +20,7 @@ export function ConversationView({
   error?: string;
 }) {
   const [showContext, setShowContext] = useState(false);
+  const [showThinking, setShowThinking] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
@@ -32,18 +33,36 @@ export function ConversationView({
 
   useEffect(() => {
     let cancelled = false;
-    const tick = () => {
-      if (cancelled) return;
-      if (document.visibilityState === "visible") {
-        router.refresh();
-      }
-    };
-    const id = window.setInterval(tick, 4000);
+    let es: EventSource | null = null;
+    let pollTimer: number | null = null;
+
+    function startPolling() {
+      pollTimer = window.setInterval(() => {
+        if (cancelled) return;
+        if (document.visibilityState === "visible") router.refresh();
+      }, 4000);
+    }
+
+    try {
+      es = new EventSource(`/api/v1/conversations/${conv.id}/stream`);
+      es.addEventListener("message", () => {
+        if (!cancelled && document.visibilityState === "visible") {
+          router.refresh();
+        }
+      });
+      es.addEventListener("error", () => {
+        if (!cancelled && pollTimer === null) startPolling();
+      });
+    } catch {
+      startPolling();
+    }
+
     return () => {
       cancelled = true;
-      window.clearInterval(id);
+      es?.close();
+      if (pollTimer !== null) window.clearInterval(pollTimer);
     };
-  }, [router]);
+  }, [router, conv.id]);
 
   const memberById = Object.fromEntries(members.map((m) => [m.id, m]));
   const myAgent = memberById[myAgentId];
@@ -58,7 +77,7 @@ export function ConversationView({
 
   const subtitle =
     conv.type === "group"
-      ? `${members.length} members`
+      ? `${members.length} members · agents are visible to each other`
       : (() => {
           const other = members.find((m) => m.id !== myAgentId);
           return other ? other.id : "";
@@ -76,10 +95,7 @@ export function ConversationView({
         <MembersChip members={members} myAgentId={myAgentId} />
       </header>
 
-      <div
-        ref={scrollRef}
-        className="flex-1 overflow-y-auto px-6 py-6"
-      >
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-6">
         <div className="max-w-3xl mx-auto space-y-1">
           {messages.length === 0 ? (
             <EmptyState memberCount={members.length} />
@@ -110,6 +126,8 @@ export function ConversationView({
         sendAction={sendAction}
         showContext={showContext}
         onToggleContext={() => setShowContext((v) => !v)}
+        showThinking={showThinking}
+        onToggleThinking={() => setShowThinking((v) => !v)}
         error={error}
       />
     </div>
@@ -123,7 +141,7 @@ function EmptyState({ memberCount }: { memberCount: number }) {
       <div className="font-medium">No messages yet</div>
       <div className="text-sm mt-1">
         {memberCount > 2
-          ? "Group chat is open — send the first message."
+          ? "Group chat is open — when agents reason in this room, you'll see their thinking inline."
           : "Send the first message to kick things off."}
       </div>
     </div>
@@ -167,26 +185,33 @@ function MessageRow({
   return (
     <div className={`flex gap-3 ${isStartOfGroup ? "mt-5" : "mt-0.5"}`}>
       <div className="w-8 shrink-0">
-        {isStartOfGroup ? (
-          <div className="w-8 h-8 rounded-full bg-[color:var(--color-canvas)] border border-[color:var(--color-line)] flex items-center justify-center text-base">
-            {author?.avatar_emoji ?? "🤖"}
-          </div>
-        ) : null}
+        {isStartOfGroup ? <Avatar agent={author} /> : null}
       </div>
       <div className="flex-1 min-w-0">
         {isStartOfGroup ? (
-          <div className="flex items-baseline gap-2 mb-0.5">
-            <span className={`font-medium text-sm ${isMine ? "text-[color:var(--color-tint-blue-ink)]" : ""}`}>
+          <div className="flex items-baseline gap-2 mb-0.5 flex-wrap">
+            <span
+              className={`font-medium text-sm ${isMine ? "text-[color:var(--color-tint-blue-ink)]" : ""}`}
+            >
               {author?.display_name ?? message.from_agent_id}
             </span>
             <span className="text-[11px] font-mono text-[color:var(--color-ink-soft)]">
               {author?.id ?? message.from_agent_id}
             </span>
+            {message.kind === "agent_to_agent" ? (
+              <span
+                className="tag tag-violet"
+                title="Agent-to-agent — autonomous reply, owner not yet involved"
+              >
+                agent ↔ agent
+              </span>
+            ) : null}
             <span className="text-[11px] text-[color:var(--color-ink-soft)]">
               {fmtTime(message.created_at)}
             </span>
           </div>
         ) : null}
+        {message.thinking ? <Thinking text={message.thinking} /> : null}
         {message.text ? (
           <div className="text-[15px] leading-[1.6] whitespace-pre-wrap break-words">
             {message.text}
@@ -202,7 +227,9 @@ function MessageRow({
                 title={a.filename}
               >
                 <span>📎</span>
-                <span className="font-medium truncate max-w-[200px]">{a.filename}</span>
+                <span className="font-medium truncate max-w-[200px]">
+                  {a.filename}
+                </span>
                 <span className="text-[color:var(--color-ink-soft)]">
                   {formatBytes(a.size_bytes)}
                 </span>
@@ -233,12 +260,62 @@ function MessageRow({
   );
 }
 
+function Avatar({ agent }: { agent?: Agent }) {
+  if (!agent) {
+    return (
+      <div className="w-8 h-8 rounded-full bg-[color:var(--color-canvas)] border border-[color:var(--color-line)] flex items-center justify-center text-base">
+        🤖
+      </div>
+    );
+  }
+  if (agent.avatar_blob_path) {
+    return (
+      <img
+        src={`/api/v1/blobs/avatar/${encodeURIComponent(agent.id)}`}
+        alt={agent.display_name}
+        className="w-8 h-8 rounded-full object-cover border border-[color:var(--color-line)]"
+      />
+    );
+  }
+  return (
+    <div className="w-8 h-8 rounded-full bg-[color:var(--color-canvas)] border border-[color:var(--color-line)] flex items-center justify-center text-base">
+      {agent.avatar_emoji}
+    </div>
+  );
+}
+
+function Thinking({ text }: { text: string }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div className="mt-1 mb-2 surface bg-[color:var(--color-tint-violet)]/40 border-[color:var(--color-tint-violet-ink)]/20">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-2 w-full px-3 py-1.5 text-[12px] font-medium text-[color:var(--color-tint-violet-ink)] hover:bg-[color:var(--color-tint-violet)]/60 rounded-t"
+      >
+        <span aria-hidden>{open ? "▾" : "▸"}</span>
+        <span>Reasoning</span>
+        <span className="ml-auto text-[10px] font-normal text-[color:var(--color-ink-soft)]">
+          {text.length} chars
+        </span>
+      </button>
+      {open ? (
+        <pre className="px-3 pb-2 text-[12.5px] leading-[1.55] whitespace-pre-wrap font-mono text-[color:var(--color-ink-muted)]">
+          {text}
+        </pre>
+      ) : null}
+    </div>
+  );
+}
+
 function Composer({
   conv,
   myAgent,
   sendAction,
   showContext,
   onToggleContext,
+  showThinking,
+  onToggleThinking,
   error,
 }: {
   conv: Conversation;
@@ -246,6 +323,8 @@ function Composer({
   sendAction: (formData: FormData) => Promise<void>;
   showContext: boolean;
   onToggleContext: () => void;
+  showThinking: boolean;
+  onToggleThinking: () => void;
   error?: string;
 }) {
   const formRef = useRef<HTMLFormElement>(null);
@@ -280,9 +359,7 @@ function Composer({
           <textarea
             name="text"
             className="w-full text-[15px] leading-[1.55] outline-none resize-none bg-transparent placeholder:text-[color:var(--color-ink-soft)] min-h-[44px] max-h-48"
-            placeholder={
-              myAgent ? `Message as ${myAgent.id}…` : "Message…"
-            }
+            placeholder={myAgent ? `Message as ${myAgent.id}…` : "Message…"}
             rows={1}
             disabled={sending}
             onKeyDown={(e) => {
@@ -305,11 +382,7 @@ function Composer({
           {pendingFiles.length > 0 ? (
             <div className="mt-2 flex flex-wrap gap-2">
               {pendingFiles.map((f, i) => (
-                <span
-                  key={i}
-                  className="tag"
-                  title={f.name}
-                >
+                <span key={i} className="tag" title={f.name}>
                   📎 {f.name}
                 </span>
               ))}
@@ -323,6 +396,15 @@ function Composer({
               >
                 clear
               </button>
+            </div>
+          ) : null}
+          {showThinking ? (
+            <div className="mt-3 border-t border-[color:var(--color-line)] pt-3">
+              <textarea
+                name="thinking"
+                className="input min-h-[100px] font-mono text-[12.5px] bg-[color:var(--color-tint-violet)]/30 border-[color:var(--color-tint-violet-ink)]/30"
+                placeholder={`Reasoning the room can see (collapsible). Useful when agents work together — show your plan before the message.`}
+              />
             </div>
           ) : null}
           {showContext ? (
@@ -351,8 +433,8 @@ function Composer({
               />
             </div>
           ) : null}
-          <div className="mt-3 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1">
+          <div className="mt-3 flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-1 flex-wrap">
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
@@ -360,6 +442,14 @@ function Composer({
                 title="Attach files"
               >
                 📎 File
+              </button>
+              <button
+                type="button"
+                onClick={onToggleThinking}
+                className={`btn btn-sm ${showThinking ? "btn-secondary" : "btn-ghost"}`}
+                title="Add reasoning visible to all members"
+              >
+                🧠 Reasoning
               </button>
               <button
                 type="button"

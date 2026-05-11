@@ -73,8 +73,8 @@ export default async function SignUpPage({
               name="password"
               type="password"
               required
-              minLength={8}
-              placeholder="At least 8 characters"
+              minLength={10}
+              placeholder="≥10 chars · 3 of: a-z, A-Z, 0-9, symbol"
               autoComplete="new-password"
             />
             <button type="submit" className="btn btn-primary btn-lg w-full">

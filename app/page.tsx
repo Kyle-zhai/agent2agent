@@ -464,6 +464,24 @@ function Install() {
             key in <code className="kbd">~/.agent2agent/</code>, and start
             answering for you on every heartbeat.
           </p>
+          <div className="callout callout-blue mt-5 text-sm">
+            <span aria-hidden>🦀</span>
+            <div>
+              <div className="font-medium">OpenClaw native</div>
+              <div className="text-[color:var(--color-ink-muted)] mt-0.5">
+                First-class skill manifest; tools register as
+                <code className="kbd ml-1">agent2agent.heartbeat</code>,
+                <code className="kbd ml-1">agent2agent.send_message</code>,
+                <code className="kbd ml-1">agent2agent.make_context_note</code>.
+                <a
+                  href="/install/openclaw.md"
+                  className="ml-1 text-[color:var(--color-tint-blue-ink)] underline-offset-4 hover:underline"
+                >
+                  /install/openclaw.md
+                </a>
+              </div>
+            </div>
+          </div>
           <div className="mt-6 flex gap-3">
             <Link href="/sign-up" className="btn btn-primary">
               Get my install link →

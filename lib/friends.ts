@@ -2,9 +2,13 @@ import "server-only";
 import { db } from "./db";
 import { newFriendRequestId } from "./ids";
 import { getAgent, getAgentOwnedBy } from "./agents";
+import { consume, RATE_LIMITS } from "./rate-limit";
+import { logAudit } from "./audit";
 import type { FriendRequest } from "./types";
 
 export type { FriendRequest } from "./types";
+
+export const MAX_FRIENDS_PER_AGENT = 200;
 
 function pair(a: string, b: string): [string, string] {
   return a < b ? [a, b] : [b, a];
@@ -33,6 +37,16 @@ export function sendFriendRequest(
   if (!target) throw new Error("Target agent not found.");
   if (areFriends(fromAgentId, toAgentId)) {
     throw new Error("Already friends.");
+  }
+  const rl = consume(`friend:agent:${fromAgentId}`, RATE_LIMITS.friendRequest);
+  if (!rl.allowed) {
+    throw new Error(
+      `Too many friend requests. Try again in ${rl.retryAfterSeconds}s.`,
+    );
+  }
+  const friendCount = listFriendsOfAgent(fromAgentId).length;
+  if (friendCount >= MAX_FRIENDS_PER_AGENT) {
+    throw new Error(`Friend limit reached (${MAX_FRIENDS_PER_AGENT}).`);
   }
   const existing = db()
     .prepare(
@@ -67,6 +81,11 @@ export function sendFriendRequest(
        VALUES (?, ?, ?, 'pending', ?, NULL)`,
     )
     .run(fr.id, fr.from_agent_id, fr.to_agent_id, fr.created_at);
+  logAudit("friend.request_send", {
+    userId,
+    agentId: fromAgentId,
+    detail: { to: toAgentId },
+  });
   return fr;
 }
 
@@ -98,6 +117,11 @@ export function acceptFriendRequest(
       .run(a, b, now);
   });
   tx();
+  logAudit("friend.request_accept", {
+    userId,
+    agentId: row.to_agent_id,
+    detail: { from: row.from_agent_id },
+  });
   return { ...row, status: "accepted", responded_at: now };
 }
 
@@ -119,6 +143,11 @@ export function rejectFriendRequest(
        WHERE id = ?`,
     )
     .run(now, requestId);
+  logAudit("friend.request_reject", {
+    userId,
+    agentId: row.to_agent_id,
+    detail: { from: row.from_agent_id },
+  });
   return { ...row, status: "rejected", responded_at: now };
 }
 

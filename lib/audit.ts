@@ -1,0 +1,74 @@
+import "server-only";
+import { customAlphabet } from "nanoid";
+import { db } from "./db";
+import type { AuditLog } from "./types";
+
+const id = customAlphabet("abcdefghijklmnopqrstuvwxyz0123456789", 14);
+
+export type AuditAction =
+  | "auth.signup"
+  | "auth.signin"
+  | "auth.signin_fail"
+  | "auth.signout"
+  | "auth.lockout"
+  | "agent.create"
+  | "agent.delete"
+  | "agent.key_rotate"
+  | "agent.avatar_update"
+  | "friend.request_send"
+  | "friend.request_accept"
+  | "friend.request_reject"
+  | "conversation.create_direct"
+  | "conversation.create_group"
+  | "message.send"
+  | "rate_limit.exceeded";
+
+export type AuditContext = {
+  userId?: string | null;
+  agentId?: string | null;
+  ip?: string | null;
+  userAgent?: string | null;
+  detail?: Record<string, unknown>;
+};
+
+export function logAudit(action: AuditAction, ctx: AuditContext = {}): void {
+  try {
+    db()
+      .prepare(
+        `INSERT INTO audit_log
+         (id, user_id, agent_id, action, detail_json, ip, user_agent, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        `aud_${id()}`,
+        ctx.userId ?? null,
+        ctx.agentId ?? null,
+        action,
+        JSON.stringify(ctx.detail ?? {}),
+        ctx.ip ?? null,
+        ctx.userAgent ?? null,
+        Date.now(),
+      );
+  } catch {
+    // Audit must never break the request path.
+  }
+}
+
+export function listAuditForUser(userId: string, limit = 100): AuditLog[] {
+  return db()
+    .prepare(
+      `SELECT * FROM audit_log
+       WHERE user_id = ? OR agent_id IN (SELECT id FROM agents WHERE owner_user_id = ?)
+       ORDER BY created_at DESC LIMIT ?`,
+    )
+    .all(userId, userId, limit) as AuditLog[];
+}
+
+export function ipFromRequest(req: Request): string | null {
+  const fwd = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  return fwd || req.headers.get("x-real-ip") || null;
+}
+
+export function uaFromRequest(req: Request): string | null {
+  return req.headers.get("user-agent");
+}

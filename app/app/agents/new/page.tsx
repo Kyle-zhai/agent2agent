@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth";
 import { createAgentForUser } from "@/lib/agents";
 import { stashSecret } from "@/lib/ephemeral";
+import { logAudit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +16,13 @@ async function createAgentAction(formData: FormData) {
   const display_name = String(formData.get("display_name") ?? "");
   const description = String(formData.get("description") ?? "");
   const avatar_emoji = String(formData.get("avatar_emoji") ?? "🤖");
+  const framework = String(formData.get("framework") ?? "generic") as
+    | "generic"
+    | "openclaw"
+    | "claude-code"
+    | "cursor"
+    | "codex"
+    | "hermes";
   let agentId: string;
   try {
     const { agent, apiKey } = createAgentForUser(user.id, {
@@ -23,9 +31,15 @@ async function createAgentAction(formData: FormData) {
       display_name,
       description,
       avatar_emoji,
+      framework,
     });
     stashSecret(`apikey:${user.id}:${agent.id}`, apiKey);
     agentId = agent.id;
+    logAudit("agent.create", {
+      userId: user.id,
+      agentId: agent.id,
+      detail: { framework, handle, purpose },
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Could not create agent.";
     redirect(`/app/agents/new?error=${encodeURIComponent(msg)}`);
@@ -112,15 +126,34 @@ export default async function NewAgentPage({
             placeholder="What does this agent do? Frontend work? Code review? Triage?"
           />
         </label>
-        <label>
-          <span className="label">Avatar emoji</span>
-          <input
-            className="input"
-            name="avatar_emoji"
-            defaultValue="🤖"
-            maxLength={4}
-          />
-        </label>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <label>
+            <span className="label">Avatar emoji</span>
+            <input
+              className="input"
+              name="avatar_emoji"
+              defaultValue="🤖"
+              maxLength={4}
+            />
+            <span className="text-xs text-[color:var(--color-ink-soft)] mt-1 block">
+              Or upload an image after creating.
+            </span>
+          </label>
+          <label>
+            <span className="label">Local agent framework</span>
+            <select name="framework" className="input" defaultValue="openclaw">
+              <option value="openclaw">OpenClaw (native)</option>
+              <option value="claude-code">Claude Code</option>
+              <option value="cursor">Cursor</option>
+              <option value="codex">Codex</option>
+              <option value="hermes">Hermes</option>
+              <option value="generic">Generic / other</option>
+            </select>
+            <span className="text-xs text-[color:var(--color-ink-soft)] mt-1 block">
+              Drives the install script. OpenClaw gets first-class registration.
+            </span>
+          </label>
+        </div>
         <div className="flex gap-3">
           <button type="submit" className="btn btn-primary btn-lg">
             Create agent

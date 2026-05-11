@@ -16,6 +16,7 @@ export function db(): Database.Database {
   _db.pragma("journal_mode = WAL");
   _db.pragma("foreign_keys = ON");
   init(_db);
+  migrate(_db);
   return _db;
 }
 
@@ -33,6 +34,9 @@ const SCHEMA_STATEMENTS: string[] = [
     display_name TEXT NOT NULL,
     password_hash TEXT NOT NULL,
     password_salt TEXT NOT NULL,
+    avatar_blob_path TEXT,
+    failed_login_count INTEGER NOT NULL DEFAULT 0,
+    locked_until INTEGER,
     created_at INTEGER NOT NULL
   )`,
 
@@ -50,9 +54,12 @@ const SCHEMA_STATEMENTS: string[] = [
     display_name TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
     avatar_emoji TEXT NOT NULL DEFAULT '🤖',
+    avatar_blob_path TEXT,
     api_key_hash TEXT NOT NULL,
     api_key_prefix TEXT NOT NULL,
+    framework TEXT NOT NULL DEFAULT 'generic',
     last_seen_at INTEGER,
+    last_message_at INTEGER,
     created_at INTEGER NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS idx_agents_owner ON agents(owner_user_id)`,
@@ -122,10 +129,15 @@ const SCHEMA_STATEMENTS: string[] = [
     conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
     from_agent_id TEXT NOT NULL REFERENCES agents(id),
     text TEXT NOT NULL DEFAULT '',
+    thinking TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL DEFAULT 'normal' CHECK (kind IN ('normal','agent_to_agent','system')),
     context_note_id TEXT REFERENCES context_notes(id),
     created_at INTEGER NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at)`,
+  `CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+    message_id UNINDEXED, conversation_id UNINDEXED, text, thinking
+  )`,
 
   `CREATE TABLE IF NOT EXISTS message_attachments (
     message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
@@ -144,4 +156,57 @@ const SCHEMA_STATEMENTS: string[] = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_dq_target_pending
     ON delivery_queue(target_agent_id, ack_at)`,
+
+  `CREATE TABLE IF NOT EXISTS audit_log (
+    id TEXT PRIMARY KEY,
+    user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+    agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+    action TEXT NOT NULL,
+    detail_json TEXT NOT NULL DEFAULT '{}',
+    ip TEXT,
+    user_agent TEXT,
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id, created_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action, created_at DESC)`,
+
+  `CREATE TABLE IF NOT EXISTS rate_limit_buckets (
+    bucket_key TEXT PRIMARY KEY,
+    tokens REAL NOT NULL,
+    last_refill_at INTEGER NOT NULL
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS conversation_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    message_id TEXT,
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_conv_events
+    ON conversation_events(conversation_id, id DESC)`,
 ];
+
+function ensureColumn(
+  d: Database.Database,
+  table: string,
+  column: string,
+  ddl: string,
+): void {
+  const cols = d
+    .prepare(`PRAGMA table_info(${table})`)
+    .all() as Array<{ name: string }>;
+  if (cols.some((c) => c.name === column)) return;
+  d.prepare(`ALTER TABLE ${table} ADD COLUMN ${ddl}`).run();
+}
+
+export function migrate(d: Database.Database): void {
+  ensureColumn(d, "users", "avatar_blob_path", "avatar_blob_path TEXT");
+  ensureColumn(d, "users", "failed_login_count", "failed_login_count INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(d, "users", "locked_until", "locked_until INTEGER");
+  ensureColumn(d, "agents", "avatar_blob_path", "avatar_blob_path TEXT");
+  ensureColumn(d, "agents", "framework", "framework TEXT NOT NULL DEFAULT 'generic'");
+  ensureColumn(d, "agents", "last_message_at", "last_message_at INTEGER");
+  ensureColumn(d, "messages", "thinking", "thinking TEXT NOT NULL DEFAULT ''");
+  ensureColumn(d, "messages", "kind", "kind TEXT NOT NULL DEFAULT 'normal'");
+}

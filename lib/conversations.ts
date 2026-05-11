@@ -11,12 +11,14 @@ import {
 } from "./ids";
 import { getAgent, getAgentOwnedBy, getAgentsByIds } from "./agents";
 import { areFriends } from "./friends";
+import { validateFileBytes } from "./file-validation";
 import type {
   Attachment,
   ContextNote,
   Conversation,
   ConversationMember,
   Message,
+  MessageKind,
   MessageWithRelations,
 } from "./types";
 
@@ -26,11 +28,18 @@ export type {
   Conversation,
   ConversationMember,
   Message,
+  MessageKind,
   MessageWithRelations,
 } from "./types";
 
 const BLOB_DIR = join(process.cwd(), "blobs");
 if (!existsSync(BLOB_DIR)) mkdirSync(BLOB_DIR, { recursive: true });
+
+export const MAX_GROUP_SIZE = 12;
+export const MAX_ATTACHMENTS_PER_MESSAGE = 10;
+export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+export const MAX_TEXT_LENGTH = 8000;
+export const MAX_THINKING_LENGTH = 16000;
 
 function isMember(conversationId: string, agentId: string): boolean {
   const row = db()
@@ -271,16 +280,41 @@ export function saveAttachment(
   uploaderAgentId: string,
   input: AttachmentInput,
 ): Attachment {
+  if (input.bytes.length === 0) {
+    throw new Error("Attachment is empty.");
+  }
+  const validated = validateFileBytes(
+    input.bytes,
+    MAX_ATTACHMENT_BYTES,
+    input.mime_type,
+  );
+  if (validated.oversized) {
+    throw new Error("Attachment exceeds 25 MB.");
+  }
+  // If a binary type was claimed but bytes don't match a known magic + aren't text, force generic.
+  let mime = input.mime_type || "application/octet-stream";
+  if (validated.detectedMime && validated.detectedMime !== mime) {
+    // Trust the detected type over a possibly-spoofed declared type.
+    mime = validated.detectedMime;
+  } else if (!validated.detectedMime && !validated.textual) {
+    mime = "application/octet-stream";
+  }
+
   const id = newAttachmentId();
-  const safeName = input.filename.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80);
-  const blobPath = join("attachments", `${id}_${safeName}`);
+  // Store with ID-only filename to neutralize any path/script tricks in user filename.
+  const blobPath = join("attachments", `${id}.bin`);
   const fullPath = join(BLOB_DIR, blobPath);
   mkdirSync(join(BLOB_DIR, "attachments"), { recursive: true });
   writeFileSync(fullPath, input.bytes);
+  // Sanitize the displayed filename.
+  const safeName = input.filename
+    .replace(/[\x00-\x1f\x7f]/g, "")
+    .replace(/[\\/]/g, "_")
+    .slice(0, 200);
   const att: Attachment = {
     id,
-    filename: input.filename,
-    mime_type: input.mime_type || "application/octet-stream",
+    filename: safeName || "attachment",
+    mime_type: mime,
     size_bytes: input.bytes.length,
     blob_path: blobPath,
     uploaded_by_agent_id: uploaderAgentId,
@@ -378,6 +412,8 @@ export function getContextNote(id: string): ContextNote | null {
 
 export type SendMessageInput = {
   text?: string;
+  thinking?: string;
+  kind?: MessageKind;
   attachment_ids?: string[];
   context_note_id?: string | null;
 };
@@ -390,11 +426,21 @@ export function sendMessage(
   if (!isMember(conversationId, fromAgentId)) {
     throw new Error("Sender is not a member of this conversation.");
   }
-  const text = (input.text ?? "").trim();
+  const text = (input.text ?? "").trim().slice(0, MAX_TEXT_LENGTH);
+  const thinking = (input.thinking ?? "").trim().slice(0, MAX_THINKING_LENGTH);
+  const kind: MessageKind = input.kind ?? "normal";
+  if (!["normal", "agent_to_agent", "system"].includes(kind)) {
+    throw new Error("Invalid message kind.");
+  }
   const attachmentIds = input.attachment_ids ?? [];
+  if (attachmentIds.length > MAX_ATTACHMENTS_PER_MESSAGE) {
+    throw new Error(
+      `Max ${MAX_ATTACHMENTS_PER_MESSAGE} attachments per message.`,
+    );
+  }
   const contextNoteId = input.context_note_id ?? null;
-  if (!text && attachmentIds.length === 0 && !contextNoteId) {
-    throw new Error("Message must have text, attachments, or a context note.");
+  if (!text && !thinking && attachmentIds.length === 0 && !contextNoteId) {
+    throw new Error("Message must have text, thinking, attachments, or a context note.");
   }
   for (const aid of attachmentIds) {
     if (!getAttachment(aid)) throw new Error(`Attachment ${aid} not found.`);
@@ -408,10 +454,17 @@ export function sendMessage(
     db()
       .prepare(
         `INSERT INTO messages
-         (id, conversation_id, from_agent_id, text, context_note_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+         (id, conversation_id, from_agent_id, text, thinking, kind,
+          context_note_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(id, conversationId, fromAgentId, text, contextNoteId, now);
+      .run(id, conversationId, fromAgentId, text, thinking, kind, contextNoteId, now);
+    db()
+      .prepare(
+        `INSERT INTO messages_fts (message_id, conversation_id, text, thinking)
+         VALUES (?, ?, ?, ?)`,
+      )
+      .run(id, conversationId, text, thinking);
     for (const aid of attachmentIds) {
       db()
         .prepare(
@@ -425,6 +478,9 @@ export function sendMessage(
          WHERE conversation_id = ? AND agent_id = ?`,
       )
       .run(id, conversationId, fromAgentId);
+    db()
+      .prepare("UPDATE agents SET last_message_at = ? WHERE id = ?")
+      .run(now, fromAgentId);
     const others = db()
       .prepare(
         `SELECT agent_id FROM conversation_members
@@ -440,9 +496,43 @@ export function sendMessage(
         )
         .run(newDeliveryId(), o.agent_id, id, now);
     }
+    db()
+      .prepare(
+        `INSERT INTO conversation_events (conversation_id, kind, message_id, created_at)
+         VALUES (?, 'message', ?, ?)`,
+      )
+      .run(conversationId, id, now);
   });
   tx();
   return getMessageWithRelations(id)!;
+}
+
+export function listConversationEventsAfter(
+  conversationId: string,
+  afterId: number,
+  limit = 50,
+): Array<{ id: number; kind: string; message_id: string | null; created_at: number }> {
+  return db()
+    .prepare(
+      `SELECT id, kind, message_id, created_at FROM conversation_events
+       WHERE conversation_id = ? AND id > ?
+       ORDER BY id ASC LIMIT ?`,
+    )
+    .all(conversationId, afterId, limit) as Array<{
+    id: number;
+    kind: string;
+    message_id: string | null;
+    created_at: number;
+  }>;
+}
+
+export function getMaxConversationEventId(conversationId: string): number {
+  const row = db()
+    .prepare(
+      `SELECT MAX(id) AS max_id FROM conversation_events WHERE conversation_id = ?`,
+    )
+    .get(conversationId) as { max_id: number | null };
+  return row.max_id ?? 0;
 }
 
 export function getMessageWithRelations(

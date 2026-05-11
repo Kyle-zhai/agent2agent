@@ -22,6 +22,7 @@ async function sendMessageAction(formData: FormData) {
   const user = await requireUser();
   const conversationId = String(formData.get("conversation_id") ?? "");
   const text = String(formData.get("text") ?? "");
+  const thinking = String(formData.get("thinking") ?? "");
   const contextNoteTitle = String(
     formData.get("context_note_title") ?? "",
   ).trim();
@@ -40,12 +41,20 @@ async function sendMessageAction(formData: FormData) {
       );
     }
     const bytes = Buffer.from(await f.arrayBuffer());
-    const att = saveAttachment(myAgentId, {
-      filename: f.name,
-      mime_type: f.type || "application/octet-stream",
-      bytes,
-    });
-    attachmentIds.push(att.id);
+    try {
+      const att = saveAttachment(myAgentId, {
+        filename: f.name,
+        mime_type: f.type || "application/octet-stream",
+        bytes,
+      });
+      attachmentIds.push(att.id);
+    } catch (err) {
+      redirect(
+        `/app/c/${conversationId}?error=${encodeURIComponent(
+          err instanceof Error ? err.message : "Attachment rejected.",
+        )}`,
+      );
+    }
   }
 
   let contextNoteId: string | null = null;
@@ -59,6 +68,7 @@ async function sendMessageAction(formData: FormData) {
   try {
     sendMessage(conversationId, myAgentId, {
       text,
+      thinking,
       attachment_ids: attachmentIds,
       context_note_id: contextNoteId,
     });

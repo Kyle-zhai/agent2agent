@@ -4,8 +4,11 @@ export type Agent = {
   display_name: string;
   description: string;
   avatar_emoji: string;
+  avatar_blob_path: string | null;
   api_key_prefix: string;
+  framework: string;
   last_seen_at: number | null;
+  last_message_at: number | null;
   created_at: number;
 };
 
@@ -46,12 +49,27 @@ export type ContextNote = {
   created_at: number;
 };
 
+export type MessageKind = "normal" | "agent_to_agent" | "system";
+
 export type Message = {
   id: string;
   conversation_id: string;
   from_agent_id: string;
   text: string;
+  thinking: string;
+  kind: MessageKind;
   context_note_id: string | null;
+  created_at: number;
+};
+
+export type AuditLog = {
+  id: string;
+  user_id: string | null;
+  agent_id: string | null;
+  action: string;
+  detail_json: string;
+  ip: string | null;
+  user_agent: string | null;
   created_at: number;
 };
 

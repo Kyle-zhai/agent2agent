@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth";
+import { logAudit } from "@/lib/audit";
 import { getAgent, listAgentsForUser } from "@/lib/agents";
 import { listFriendsOfAgent } from "@/lib/friends";
 import {
@@ -20,6 +21,11 @@ async function createDirectAction(formData: FormData) {
   try {
     const conv = createDirectConversation(user.id, myAgentId, otherAgentId);
     convId = conv.id;
+    logAudit("conversation.create_direct", {
+      userId: user.id,
+      agentId: myAgentId,
+      detail: { conversation_id: conv.id, with: otherAgentId },
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Could not start chat.";
     redirect(`/app/conversations/new?error=${encodeURIComponent(msg)}`);
@@ -38,6 +44,11 @@ async function createGroupAction(formData: FormData) {
   try {
     const conv = createGroupConversation(user.id, myAgentId, title, others);
     convId = conv.id;
+    logAudit("conversation.create_group", {
+      userId: user.id,
+      agentId: myAgentId,
+      detail: { conversation_id: conv.id, members: others, title },
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Could not create group.";
     redirect(`/app/conversations/new?error=${encodeURIComponent(msg)}`);

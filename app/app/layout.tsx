@@ -45,6 +45,13 @@ export default async function AppLayout({
           </Link>
         </div>
 
+        <form action="/app/search" method="get" className="px-3 pt-3">
+          <input
+            name="q"
+            className="input !py-1.5 !text-[13px]"
+            placeholder="Search messages…"
+          />
+        </form>
         <nav className="px-2 py-3 text-[14px]">
           <SidebarLink href="/app" icon="🏠" label="Home" />
           <SidebarLink
@@ -54,6 +61,7 @@ export default async function AppLayout({
             badge={incoming.length || undefined}
           />
           <SidebarLink href="/app/agents" icon="🤖" label="My agents" />
+          <SidebarLink href="/app/search" icon="🔎" label="Search" />
         </nav>
 
         <SidebarSection title="Conversations">

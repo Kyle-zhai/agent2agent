@@ -1,11 +1,43 @@
 import "server-only";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { db } from "./db";
 import { newSessionId, newUserId } from "./ids";
 import { hashPassword, verifyPassword } from "./crypto";
+import { consume, RATE_LIMITS } from "./rate-limit";
+import { logAudit } from "./audit";
 
 const COOKIE_NAME = "a2a_session";
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
+const LOCKOUT_THRESHOLD = 5;
+const LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15 min
+
+async function clientFingerprint(): Promise<{ ip: string | null; ua: string | null }> {
+  const h = await headers();
+  const ip =
+    h.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    h.get("x-real-ip") ||
+    null;
+  return { ip, ua: h.get("user-agent") };
+}
+
+function validatePassword(p: string): void {
+  if (p.length < 10) {
+    throw new Error("Password must be at least 10 characters.");
+  }
+  let classes = 0;
+  if (/[a-z]/.test(p)) classes++;
+  if (/[A-Z]/.test(p)) classes++;
+  if (/[0-9]/.test(p)) classes++;
+  if (/[^A-Za-z0-9]/.test(p)) classes++;
+  if (classes < 3) {
+    throw new Error(
+      "Password must include at least 3 of: lowercase, uppercase, digit, symbol.",
+    );
+  }
+  if (/(.)\1\1\1/.test(p)) {
+    throw new Error("Password contains a too-repetitive sequence.");
+  }
+}
 
 export type User = {
   id: string;
@@ -21,13 +53,23 @@ export async function signUp(
   password: string,
   displayName: string,
 ): Promise<User> {
+  const fp = await clientFingerprint();
+  const rl = consume(`signup:ip:${fp.ip ?? "anon"}`, RATE_LIMITS.signup);
+  if (!rl.allowed) {
+    logAudit("rate_limit.exceeded", {
+      ip: fp.ip,
+      userAgent: fp.ua,
+      detail: { route: "signup" },
+    });
+    throw new Error(
+      `Too many sign-up attempts. Try again in ${rl.retryAfterSeconds}s.`,
+    );
+  }
   const cleanEmail = email.trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
     throw new Error("Invalid email.");
   }
-  if (password.length < 8) {
-    throw new Error("Password must be at least 8 characters.");
-  }
+  validatePassword(password);
   const name = displayName.trim();
   if (name.length < 1 || name.length > 60) {
     throw new Error("Display name must be 1-60 characters.");
@@ -35,7 +77,10 @@ export async function signUp(
   const existing = db()
     .prepare("SELECT id FROM users WHERE email = ?")
     .get(cleanEmail);
-  if (existing) throw new Error("This email is already registered.");
+  if (existing) {
+    // Generic message to avoid email enumeration.
+    throw new Error("Could not create account. Try a different email.");
+  }
 
   const { hash, salt } = hashPassword(password);
   const user: User = {
@@ -51,18 +96,89 @@ export async function signUp(
     )
     .run(user.id, user.email, user.display_name, hash, salt, user.created_at);
   await createSession(user.id);
+  logAudit("auth.signup", { userId: user.id, ip: fp.ip, userAgent: fp.ua });
   return user;
 }
 
 export async function signIn(email: string, password: string): Promise<User> {
+  const fp = await clientFingerprint();
+  const rl = consume(`signin:ip:${fp.ip ?? "anon"}`, RATE_LIMITS.signin);
+  if (!rl.allowed) {
+    logAudit("rate_limit.exceeded", {
+      ip: fp.ip,
+      userAgent: fp.ua,
+      detail: { route: "signin" },
+    });
+    throw new Error(
+      `Too many sign-in attempts. Try again in ${rl.retryAfterSeconds}s.`,
+    );
+  }
+  const cleanEmail = email.trim().toLowerCase();
   const row = db()
     .prepare("SELECT * FROM users WHERE email = ?")
-    .get(email.trim().toLowerCase()) as UserRow | undefined;
-  if (!row) throw new Error("Email or password is incorrect.");
-  if (!verifyPassword(password, row.password_hash, row.password_salt)) {
+    .get(cleanEmail) as
+    | (UserRow & { failed_login_count: number; locked_until: number | null })
+    | undefined;
+  // Constant-ish timing path: always verify with a placeholder hash if user missing.
+  if (!row) {
+    verifyPassword(
+      password,
+      "0".repeat(128),
+      "0".repeat(32),
+    );
+    logAudit("auth.signin_fail", {
+      ip: fp.ip,
+      userAgent: fp.ua,
+      detail: { reason: "no_user" },
+    });
     throw new Error("Email or password is incorrect.");
   }
+  if (row.locked_until && row.locked_until > Date.now()) {
+    const sec = Math.ceil((row.locked_until - Date.now()) / 1000);
+    logAudit("auth.signin_fail", {
+      userId: row.id,
+      ip: fp.ip,
+      userAgent: fp.ua,
+      detail: { reason: "locked" },
+    });
+    throw new Error(`Account temporarily locked. Try again in ${sec}s.`);
+  }
+  const ok = verifyPassword(password, row.password_hash, row.password_salt);
+  if (!ok) {
+    const newCount = (row.failed_login_count ?? 0) + 1;
+    const lock =
+      newCount >= LOCKOUT_THRESHOLD
+        ? Date.now() + LOCKOUT_DURATION_MS
+        : null;
+    db()
+      .prepare(
+        `UPDATE users SET failed_login_count = ?, locked_until = ? WHERE id = ?`,
+      )
+      .run(newCount, lock, row.id);
+    if (lock) {
+      logAudit("auth.lockout", {
+        userId: row.id,
+        ip: fp.ip,
+        userAgent: fp.ua,
+        detail: { until: lock },
+      });
+    } else {
+      logAudit("auth.signin_fail", {
+        userId: row.id,
+        ip: fp.ip,
+        userAgent: fp.ua,
+      });
+    }
+    throw new Error("Email or password is incorrect.");
+  }
+  // Success: reset counters.
+  db()
+    .prepare(
+      `UPDATE users SET failed_login_count = 0, locked_until = NULL WHERE id = ?`,
+    )
+    .run(row.id);
   await createSession(row.id);
+  logAudit("auth.signin", { userId: row.id, ip: fp.ip, userAgent: fp.ua });
   return {
     id: row.id,
     email: row.email,
@@ -75,7 +191,18 @@ export async function signOut(): Promise<void> {
   const jar = await cookies();
   const sid = jar.get(COOKIE_NAME)?.value;
   if (sid) {
+    const session = db()
+      .prepare("SELECT user_id FROM sessions WHERE id = ?")
+      .get(sid) as { user_id: string } | undefined;
     db().prepare("DELETE FROM sessions WHERE id = ?").run(sid);
+    if (session) {
+      const fp = await clientFingerprint();
+      logAudit("auth.signout", {
+        userId: session.user_id,
+        ip: fp.ip,
+        userAgent: fp.ua,
+      });
+    }
   }
   jar.delete(COOKIE_NAME);
 }

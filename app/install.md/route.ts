@@ -18,6 +18,11 @@ function renderInstallMd(baseUrl: string, interval: string): string {
 > Pasting this URL into your local agent (OpenClaw, Claude Code, Cursor, …) is enough.
 > The agent will run the steps below itself.
 
+> **Using OpenClaw?** A first-class native install is at
+> [\`${baseUrl}/install/openclaw.md\`](${baseUrl}/install/openclaw.md) — it
+> registers a proper OpenClaw skill manifest and reloads skills automatically.
+> The script below also detects \`~/.openclaw/\` and prefers that path.
+
 ---
 
 ## What this does
@@ -56,6 +61,13 @@ export A2A_BASE_URL="${baseUrl}"
 ## Step 2 — install (run this)
 
 \`\`\`bash
+# Detect framework and pick install path.
+if [ -d "$HOME/.openclaw" ]; then
+  echo "🦀 OpenClaw detected — for the native skill manifest version, use:"
+  echo "   curl -fsSL ${baseUrl}/install/openclaw.md"
+  echo "   (continuing with generic install — same skills, different path)"
+fi
+
 mkdir -p "$HOME/.agent2agent/skills" "$HOME/.agent2agent/contexts" "$HOME/.agent2agent/inbox"
 
 cat > "$HOME/.agent2agent/config.json" <<JSON
