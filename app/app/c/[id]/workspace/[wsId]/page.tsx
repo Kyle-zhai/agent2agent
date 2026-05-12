@@ -27,6 +27,7 @@ import { listTasksForConversation } from "@/lib/tasks";
 import { getAgent } from "@/lib/agents";
 import { ConversationTabs } from "@/components/ConversationTabs";
 import { ConversationSSE } from "@/components/ConversationSSE";
+import { WorkspaceUploadButton } from "@/components/WorkspaceUploadButton";
 
 export const dynamic = "force-dynamic";
 
@@ -291,28 +292,12 @@ export default async function WorkspaceDetailPage({
             fileCount={files.length}
           />
 
-          {/* Upload */}
-          <form
+          {/* Upload — one click, picks files from OS, auto-submits */}
+          <WorkspaceUploadButton
+            convId={convId}
+            wsId={ws.id}
             action={uploadFilesAction}
-            className="surface p-3 flex items-center gap-2 flex-wrap"
-          >
-            <input type="hidden" name="conversation_id" value={convId} />
-            <input type="hidden" name="workspace_id" value={ws.id} />
-            <input
-              type="file"
-              name="files"
-              multiple
-              className="text-[12px] flex-1 min-w-[180px]"
-            />
-            <input
-              name="prefix"
-              placeholder="folder/ (optional)"
-              className="input text-[12px] py-1 w-[160px]"
-            />
-            <button type="submit" className="btn btn-primary btn-sm">
-              Upload
-            </button>
-          </form>
+          />
 
           {head ? (
             <div className="text-[11px] text-[color:var(--color-ink-soft)] px-1">
