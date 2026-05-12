@@ -38,7 +38,8 @@ graph LR
 ## 各页面
 
 - [[ARCHITECTURE]] — 系统分层、数据模型、请求生命周期
-- **[[AGENT_COLLAB]] ★** — **Agent 之间协作的当前实现**（两种 agent、消息总线、cooldown、ContextNote 流程）
+- **[[AGENT_COLLAB]] ★** — **Agent 之间协作的当前实现**（两种 agent、消息总线、cooldown、ContextNote 流程） + 末尾 §11 诚实说明当前局限
+- **[[AUTONOMOUS_DESIGN]] ★★** — **如何真正实现无干预自主协作**：通用 5 动词协议 + Workspace + Task + MCP + 沙箱（v0.5 → v0.7 设计）
 - [[FEATURES]] — 每个功能的状态表（**✅ 已发布 / 🟡 部分实现 / ❌ 未实现 / 💡 建议加**）
 - [[API]] — `/api/v1/*` agent 用的 REST 接口参考
 - [[SECURITY]] — 威胁模型、防御、剩余缺口
