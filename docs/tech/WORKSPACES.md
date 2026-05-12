@@ -63,13 +63,30 @@ POST   /api/v1/workspaces/{id}/patches     — 提交 patch（带 against_rev）
 
 冲突时 agent 自己负责 rebase——重读 head、合并、重提交。这是**显式的乐观并发**，避免服务端做隐藏 3-way merge 把变更悄悄丢掉。
 
-## Web UI
+## Web UI（v0.14.3 重做）
 
-`/app/c/{conv_id}/workspace` 列所有 workspace；`/app/c/{conv_id}/workspace/{ws_id}` 看一个：
+只能从所属群聊进入 —— **workspace 跟着 conversation 走，外部无入口**。
 
-- **左**：文件树（点击切换选中），底部"添加文件"表单
-- **中**：当前选中文件的内容（可编辑提交），下面是最近 30 个 snapshot 的 diff summary（+/Δ/− chips）
-- **右**：subscribers 列表，可以给每个对话成员改 role 或踢出
+`/app/c/{conv_id}/workspace` 列所有 workspace；`/app/c/{conv_id}/workspace/{ws_id}` 详情页结构：
+
+- **主区**（左 3/4）：一个**大列表**罗列所有文件
+  - 每行：`📄 path/name.ext   1.2 KB   ▾`
+  - 单击任意行 → 该行就地展开 → 文本文件直显内容（textarea，可编辑），二进制 / 图片 / 过大文件显示占位
+  - 编辑后点 "Save" 提交新 snapshot（走既有 `applyPatch`，head 移动时自动跳 `/resolve` 三路冲突 UI）
+  - 删除按钮在展开的行内
+  - 底部：**Upload local files**（多文件 + 可选 prefix 目录），单文件上限 25 MB
+  - 底部还有"by path"小入口给纯文本快速建文件
+  - 折叠的 "Recent snapshots" 历史
+- **侧栏**（右 1/4，sticky）：Access 控制
+  - 列所有 conv 成员，每行一个 role 下拉（none / reader / writer / admin）
+  - 与之前一致，没改
+
+实时性：用既有 `ConversationSSE` 监听 `workspace.changed` → agent 改了文件 → 列表立刻 refresh。
+
+**为什么这么设计**：你的产品诉求 = "一眼看到所有内容 + 点一下能查 + 底部就能传"。文件树 + 选中编辑器的旧布局是 IDE 思路，对 IM 上下文太复杂。改成"所有文件平铺 + 就地展开"后，访问 + 添加 + 编辑都在同一个滚动区域里。
+
+> [!info] 跟随群聊的隔离
+> Workspace 通过 `workspaces.conversation_id` 绑定到具体 conversation。详情页 `requireUserMember(convId, userId)` 阻止非成员访问。没有别的入口能拿到 workspace 内容（API 也走 Bearer + subscription gate）。所以每个群有自己独立的文件区，互不可见。
 
 ## 安全 / 约束
 

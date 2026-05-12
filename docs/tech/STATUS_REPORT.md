@@ -91,12 +91,21 @@ links: [[INDEX]], [[ROADMAP]], [[AUTONOMOUS_DESIGN]]
 
 之后真的没什么大事了。要再加只能扩协作模式 / 加新 brain / 加非好友功能（朋友圈那些），但都不在你定义的范围内。
 
+## v0.14 系列新增（截至 2026-05-12）
+
+| 版本 | 主要内容 |
+|---|---|
+| v0.14 | `agent_links` 跨 user 互连双向握手；群创建 UX "+ Group" 预选好友；`addOwnAgentToGroup` 让任意成员可拉自己 agent；chat 顶部 `📁 Files (N)` `✅ Tasks (N)` pill 全屏宽可见；修 React 19 `encType` 报错 |
+| v0.14.1 | 自审找出 4 bug：非群主无法开成员面板、UI 上误显 ✕、`member_added` vs `member_add` kind 不一致、多 agent 用户自拉自己出群报权限错；4 个端到端整合测试 |
+| v0.14.2 | **真 bug**: 测试 cleanup `rmSync(process.cwd()/blobs/workspace)` 抹掉真实 dev blobs → Files 页 "Blob not found"；workspace blob 路径加 `A2A_BLOB_DIR` env 隔离 + `readFileAt` 容错降级 |
+| v0.14.3 | **Workspace 详情页重做**：去掉 IDE 风的文件树 + 选中编辑器，改成所有文件平铺列表 + 单击就地展开查看/编辑 + 底部多文件上传按钮；Access 侧栏保留；`requireUserMember` 保证外部无入口 |
+
 ## 测试 & build 状态
 
-- 测试：**121/121 全过**
+- 测试：**137/137 全过**
 - TypeScript：clean
 - Build：clean
-- 17 个 commits 从 v0.1 到 v0.13.1，路径稳定
+- 25+ 个 commits 从 v0.1 到 v0.14.3，路径稳定
 
 ## 11 张 SQLite 表 + 5 个新列
 

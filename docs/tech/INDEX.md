@@ -26,6 +26,7 @@ graph LR
   IDX --> SBX[SANDBOX]
   IDX --> OAU[OAUTH]
   IDX --> RPC[REVERSE_RPC]
+  IDX --> LNK[AGENT_LINKS]
   IDX --> FEAT[FEATURES]
   IDX --> API[API]
   IDX --> SEC[SECURITY]
@@ -56,6 +57,8 @@ graph LR
   OAU --> SEC
   TLS -.->|未匹配内置时| RPC
   RPC --> SES
+  LNK --> COL
+  LNK -.->|advisory| TSK
 ```
 
 ## 各页面
@@ -70,6 +73,7 @@ graph LR
 - **[[SANDBOX]]** — v0.8 test_command 真执行：本地 child_process + Vercel Sandbox runtime
 - **[[OAUTH]]** — v0.9 OAuth + 邀请链接：5 个 provider（Google/GitHub/Apple/WeChat/Instagram）+ 邀请 base64url code + 自动 friendship
 - **[[REVERSE_RPC]]** — v0.12 反向 RPC：agent 声明 `mcp.host` capability → server 把 tool 调用路由给 host → SSE 推 → 本地执行 → POST 回结果
+- **[[AGENT_LINKS]]** — v0.14 跨 user agent 在一个 conv 内的"互连"双向握手：request / accept / decline / revoke，社交意图明示（advisory，不硬 gate）
 - [[FEATURES]] — 每个功能的状态表（**✅ 已发布 / 🟡 部分实现 / ❌ 未实现 / 💡 建议加**）
 - [[API]] — `/api/v1/*` agent 用的 REST 接口参考
 - [[SECURITY]] — 威胁模型、防御、剩余缺口
@@ -107,6 +111,9 @@ graph LR
 | **v0.12** | **反向 MCP RPC**：agent 通过 `mcp.host` capability 声明承载哪些工具；`POST /tools/invoke` 未匹配内置时自动路由给 host → SSE 推送 `tool.call_requested` → host POST `/sessions/:id/tool_results`；deferred Promise + 超时（默认 30s/最大 5min）+ cancel；friend-only 路由鉴权 |
 | **v0.13** | **Debate panel + Hub & Spoke fan-out**（多 agent 协作 6 模式中适合 IM 的两条）：`debate_panel` success criterion 用 pro/con/arbiter 三个独立 brain 跑 thesis-antithesis-synthesis，按 snapshot 幂等；`task.split` 工具一次把父 task 派给 ≤12 个 assignee 并自动 block parent；UI 在 task 详情时间线渲染 PRO/CON/ARBITER 三色 chip + fold-out fan-out 表单 |
 | **v0.14** | **群创建 UX + agent 互连握手 + 文件区可见度**：联系人页 "+ Group" 一键预选好友；任意群成员可自助拉自己 agent 进群（`addOwnAgentToGroup`）；新 `agent_links` 表 + 跨 user agent 双方握手（request/accept/decline/revoke）；成员面板渲染互连矩阵；chat header "📁 Files (N) ✅ Tasks (N)" 在所有屏宽可见，点直达；修 React 19 `encType` 报错 |
+| **v0.14.1** | v0.14 自审 4 个 bug：非群主看不到"Members"按钮、✕ 显示给无权限的人、member_added/member_removed 命名不一致、多 agent 自拉自己出群权限错；新加 4 个端到端整合测试 |
+| **v0.14.2** | 测试 cleanup 抹掉真实 blob 目录（"Blob not found" 报错根因）：workspace blob 路径加 `A2A_BLOB_DIR` env 隔离 + `readFileAt` 容错降级，dev 数据重 seed 恢复 |
+| **v0.14.3** | **Workspace 详情页重做**：所有文件平铺 + 就地展开查看/编辑 + 底部多文件上传按钮 + Access 侧栏保留 + 群聊外无入口（`requireUserMember` 强制）|
 
 ## 怎么读
 
