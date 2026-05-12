@@ -20,6 +20,9 @@ export const newDeliveryId = () => `dlv_${slug()}`;
 export const newWorkspaceId = () => `wks_${slug()}`;
 export const newSnapshotId = () => `snap_${slug()}${tail()}`;
 export const newTaskId = () => `tsk_${slug()}`;
+export const newAgentSessionId = () => `asx_${slug()}${tail()}`;
+export const newToolInvocationId = () => `inv_${slug()}${tail()}`;
+export const newSandboxRunId = () => `sbx_${slug()}${tail()}`;
 
 const reservedAgentNames = new Set([
   "admin", "system", "root", "you", "me", "agent",

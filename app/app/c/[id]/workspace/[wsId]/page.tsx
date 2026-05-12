@@ -357,7 +357,12 @@ export default async function WorkspaceDetailPage({
                   >
                     <div className="min-w-0">
                       <div>
-                        <code className="font-mono">{shortenSha(s.id)}</code>
+                        <Link
+                          href={`/app/c/${convId}/workspace/${ws.id}/snap/${s.id}`}
+                          className="font-mono underline"
+                        >
+                          {shortenSha(s.id)}
+                        </Link>
                         <span className="ml-2">{s.commit_message || "—"}</span>
                       </div>
                       <div className="text-[11px] text-[color:var(--color-ink-soft)] mt-0.5 flex flex-wrap gap-1">

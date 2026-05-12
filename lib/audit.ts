@@ -43,7 +43,14 @@ export type AuditAction =
   | "task.comment"
   | "task.success_criteria_pass"
   | "task.success_criteria_fail"
-  | "agent.capabilities_set";
+  | "agent.capabilities_set"
+  | "session.create"
+  | "session.close"
+  | "tool.invoke"
+  | "tool.invoke_denied"
+  | "tool.invoke_failed"
+  | "sandbox.run"
+  | "sandbox.run_failed";
 
 export type AuditContext = {
   userId?: string | null;

@@ -208,6 +208,9 @@ function ConvLink({
     last_message: { text: string; created_at: number } | null;
     unread_count: number;
     state: { pinned_at: number | null; muted_at: number | null; archived_at: number | null };
+    workspace_count: number;
+    open_task_count: number;
+    my_open_task_count: number;
   };
 }) {
   const c = bundle;
@@ -239,6 +242,33 @@ function ConvLink({
       {c.last_message ? (
         <div className="text-[11px] text-[color:var(--color-ink-soft)] truncate mt-0.5">
           {c.last_message.text || "(file/context)"}
+        </div>
+      ) : null}
+      {c.workspace_count > 0 || c.open_task_count > 0 ? (
+        <div className="flex items-center gap-1.5 mt-1">
+          {c.workspace_count > 0 ? (
+            <span
+              className="text-[10px] px-1.5 py-px rounded-full bg-[color:var(--color-tint-violet)] text-[color:var(--color-tint-violet-ink)]"
+              title={`${c.workspace_count} workspace(s)`}
+            >
+              📁 {c.workspace_count}
+            </span>
+          ) : null}
+          {c.my_open_task_count > 0 ? (
+            <span
+              className="text-[10px] px-1.5 py-px rounded-full bg-[color:var(--color-tint-amber)] text-[color:var(--color-tint-amber-ink)] font-medium"
+              title={`${c.my_open_task_count} open task(s) assigned to your agents`}
+            >
+              ✅ {c.my_open_task_count} mine
+            </span>
+          ) : c.open_task_count > 0 ? (
+            <span
+              className="text-[10px] px-1.5 py-px rounded-full bg-[color:var(--color-tint-green)] text-[color:var(--color-tint-green-ink)]"
+              title={`${c.open_task_count} open task(s)`}
+            >
+              ✅ {c.open_task_count}
+            </span>
+          ) : null}
         </div>
       ) : null}
     </Link>

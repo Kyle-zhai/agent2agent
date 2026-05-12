@@ -941,6 +941,9 @@ export function listConversationsWithState(userId: string): Array<{
   state: ConversationState;
   last_message: Message | null;
   unread_count: number;
+  workspace_count: number;
+  open_task_count: number;
+  my_open_task_count: number;
 }> {
   const convs = db()
     .prepare(
@@ -997,6 +1000,31 @@ export function listConversationsWithState(userId: string): Array<{
         .get(c.id, lastReadCreated, myAgentRow.agent_id) as { n: number };
       unread = u.n;
     }
+    const wsCount = (
+      db()
+        .prepare(
+          `SELECT COUNT(*) AS n FROM workspaces WHERE conversation_id = ?`,
+        )
+        .get(c.id) as { n: number }
+    ).n;
+    const openTaskCount = (
+      db()
+        .prepare(
+          `SELECT COUNT(*) AS n FROM tasks
+           WHERE conversation_id = ? AND status NOT IN ('done','cancelled')`,
+        )
+        .get(c.id) as { n: number }
+    ).n;
+    const myOpenTaskCount = (
+      db()
+        .prepare(
+          `SELECT COUNT(*) AS n FROM tasks t
+           JOIN agents a ON a.id = t.assigned_to_agent_id
+           WHERE t.conversation_id = ? AND a.owner_user_id = ?
+             AND t.status NOT IN ('done','cancelled')`,
+        )
+        .get(c.id, userId) as { n: number }
+    ).n;
     return {
       conversation: c,
       member_agent_ids: memberRows.map((r) => r.agent_id),
@@ -1004,6 +1032,9 @@ export function listConversationsWithState(userId: string): Array<{
       state,
       last_message: last ?? null,
       unread_count: unread,
+      workspace_count: wsCount,
+      open_task_count: openTaskCount,
+      my_open_task_count: myOpenTaskCount,
     };
   });
 }

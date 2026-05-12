@@ -346,6 +346,54 @@ const SCHEMA_STATEMENTS: string[] = [
     added_at INTEGER NOT NULL,
     PRIMARY KEY (task_id, kind, ref_id)
   )`,
+
+  // v0.6 sessions (JOIN + cursor-based event replay) ----------------------
+
+  `CREATE TABLE IF NOT EXISTS agent_sessions (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    cursor INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    last_seen_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_agent_sessions_agent
+    ON agent_sessions(agent_id)`,
+
+  // v0.7 tool calling -----------------------------------------------------
+
+  `CREATE TABLE IF NOT EXISTS tool_invocations (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    tool_name TEXT NOT NULL,
+    args_json TEXT NOT NULL DEFAULT '{}',
+    result_json TEXT,
+    error TEXT,
+    duration_ms INTEGER,
+    task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_tool_inv_agent
+    ON tool_invocations(agent_id, created_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_tool_inv_task ON tool_invocations(task_id)`,
+
+  // v0.8 sandbox runs -----------------------------------------------------
+
+  `CREATE TABLE IF NOT EXISTS sandbox_runs (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    snapshot_id TEXT REFERENCES workspace_snapshots(id) ON DELETE SET NULL,
+    initiated_by_agent_id TEXT REFERENCES agents(id),
+    cmd TEXT NOT NULL,
+    shell TEXT NOT NULL DEFAULT 'bash',
+    runtime TEXT NOT NULL,
+    exit_code INTEGER,
+    stdout TEXT NOT NULL DEFAULT '',
+    stderr TEXT NOT NULL DEFAULT '',
+    started_at INTEGER NOT NULL,
+    finished_at INTEGER
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_sandbox_runs_task
+    ON sandbox_runs(task_id, started_at DESC)`,
 ];
 
 function ensureColumn(

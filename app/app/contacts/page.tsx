@@ -16,6 +16,9 @@ import {
   rejectFriendRequest,
   sendFriendRequest,
 } from "@/lib/friends";
+import { createDirectConversation, listMembers } from "@/lib/conversations";
+import { db } from "@/lib/db";
+import { createWorkspace, subscribeAgent } from "@/lib/workspaces";
 
 export const dynamic = "force-dynamic";
 
@@ -49,6 +52,58 @@ async function acceptAction(formData: FormData) {
     const msg = err instanceof Error ? err.message : "Could not accept.";
     redirect(`/app/contacts?error=${encodeURIComponent(msg)}`);
   }
+}
+
+async function startWorkspaceAction(formData: FormData) {
+  "use server";
+  const user = await requireUser();
+  const otherAgentId = String(formData.get("other_agent_id") ?? "").trim();
+  const myAgents = listAgentsForUser(user.id);
+  if (myAgents.length === 0) {
+    redirect("/app/agents/new?error=create+an+agent+first");
+  }
+  // Pick the user's first agent that's friended with the other. The actual
+  // pick rule is "first listed agent that is in a friendship row with the
+  // target"; this matches the existing chat-with friend defaulting.
+  const otherFriends = listFriendsOfAgent(otherAgentId);
+  const mine = myAgents.find((a) => otherFriends.includes(a.id));
+  if (!mine) {
+    redirect(
+      `/app/contacts?error=${encodeURIComponent(
+        "None of your agents are friends with " + otherAgentId,
+      )}`,
+    );
+  }
+  const myAgentId = mine!.id;
+
+  // Reuse existing direct conv between these two agents if it exists,
+  // else create one. The createDirectConversation helper is idempotent
+  // when the pair already share a conv.
+  const existing = db()
+    .prepare(
+      `SELECT c.id FROM conversations c
+       JOIN conversation_members m1 ON m1.conversation_id = c.id AND m1.agent_id = ?
+       JOIN conversation_members m2 ON m2.conversation_id = c.id AND m2.agent_id = ?
+       WHERE c.type = 'direct' LIMIT 1`,
+    )
+    .get(myAgentId, otherAgentId) as { id: string } | undefined;
+  const convId =
+    existing?.id ??
+    createDirectConversation(user.id, myAgentId, otherAgentId).id;
+
+  // Make a workspace bound to that conv with both agents as writers.
+  const ws = createWorkspace({
+    name: `shared-${new Date().toISOString().slice(0, 10)}`,
+    conversation_id: convId,
+    created_by_agent_id: myAgentId,
+  });
+  for (const m of listMembers(convId)) {
+    if (m.agent_id !== myAgentId) {
+      subscribeAgent(ws.id, m.agent_id, "writer");
+    }
+  }
+  revalidatePath("/app", "layout");
+  redirect(`/app/c/${convId}/workspace/${ws.id}`);
 }
 
 async function rejectAction(formData: FormData) {
@@ -225,12 +280,24 @@ export default async function ContactsPage({
                     {f.description}
                   </p>
                 ) : null}
-                <Link
-                  href={`/app/conversations/new?with=${encodeURIComponent(f.id)}`}
-                  className="btn btn-secondary btn-sm mt-3"
-                >
-                  Start chat
-                </Link>
+                <div className="mt-3 flex gap-1.5 flex-wrap">
+                  <Link
+                    href={`/app/conversations/new?with=${encodeURIComponent(f.id)}`}
+                    className="btn btn-secondary btn-sm"
+                  >
+                    Start chat
+                  </Link>
+                  <form action={startWorkspaceAction}>
+                    <input type="hidden" name="other_agent_id" value={f.id} />
+                    <button
+                      type="submit"
+                      className="btn btn-primary btn-sm"
+                      title="Direct chat + a shared workspace, in one click"
+                    >
+                      + Workspace
+                    </button>
+                  </form>
+                </div>
               </li>
             ))}
           </ul>

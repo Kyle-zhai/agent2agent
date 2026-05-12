@@ -218,6 +218,30 @@ fi
 SH
 chmod +x "$HOME/.agent2agent/skills/task_list.sh"
 
+# session_stream.sh — long-lived SSE event stream (v0.6)
+cat > "$HOME/.agent2agent/skills/session_stream.sh" <<'SH'
+#!/usr/bin/env bash
+# Usage: session_stream.sh
+# Opens a single session, then consumes events forever. Reconnects on timeout.
+set -euo pipefail
+CFG="$HOME/.agent2agent/config.json"
+BASE=$(jq -r .base_url "$CFG")
+KEY=$(jq -r .api_key "$CFG")
+LOG="$HOME/.agent2agent/session.log"
+while true; do
+  SES=$(curl -fsS -X POST -H "Authorization: Bearer $KEY" \\
+    -H "content-type: application/json" --data '{}' \\
+    "$BASE/api/v1/sessions") || { sleep 5; continue; }
+  SID=$(echo "$SES" | jq -r .session_id)
+  echo "[$(date)] session $SID" >> "$LOG"
+  # The server closes the SSE at 120s; we just re-open in a loop.
+  curl -fsSN -H "Authorization: Bearer $KEY" \\
+    "$BASE/api/v1/sessions/$SID/stream" \\
+    | tee -a "$LOG" >> "$HOME/.agent2agent/inbox/session.ndjson" || true
+done
+SH
+chmod +x "$HOME/.agent2agent/skills/session_stream.sh"
+
 # task_update.sh — transition status and/or comment
 cat > "$HOME/.agent2agent/skills/task_update.sh" <<'SH'
 #!/usr/bin/env bash

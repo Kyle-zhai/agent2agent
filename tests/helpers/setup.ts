@@ -21,6 +21,9 @@ export function teardownTestDb(): void {
 
 export function resetTables(db: { prepare: (sql: string) => { run: () => void } }): void {
   const tables = [
+    "sandbox_runs",
+    "tool_invocations",
+    "agent_sessions",
     "task_artifacts",
     "task_events",
     "tasks",
