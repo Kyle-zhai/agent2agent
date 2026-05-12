@@ -8,6 +8,11 @@ export function setupTestDb(): { scratch: string; dbPath: string } {
   SCRATCH = mkdtempSync(join(tmpdir(), "a2a-test-"));
   const dbPath = join(SCRATCH, "test.db");
   process.env.A2A_DB_PATH = dbPath;
+  // Isolate workspace blob storage so test cleanup never touches the
+  // dev/prod `./blobs/` tree — without this, running the suite once
+  // wiped the demo seed's workspace blobs and "Files" pages broke with
+  // "Blob not found" in the browser.
+  process.env.A2A_BLOB_DIR = join(SCRATCH, "blobs");
   return { scratch: SCRATCH, dbPath };
 }
 
@@ -17,6 +22,7 @@ export function teardownTestDb(): void {
     SCRATCH = null;
   }
   delete process.env.A2A_DB_PATH;
+  delete process.env.A2A_BLOB_DIR;
 }
 
 export function resetTables(db: { prepare: (sql: string) => { run: () => void } }): void {

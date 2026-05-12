@@ -28,7 +28,10 @@ const PATH_RE = /^(?!\.)[^\\\0]+$/; // no backslash, no NUL, no leading dot
 const SEG_RE = /^[A-Za-z0-9._-][A-Za-z0-9._\- ]{0,254}$/;
 
 function workspaceBlobDir(): string {
-  return join(process.cwd(), "blobs", "workspace");
+  // Tests set A2A_BLOB_DIR to isolate from the dev/prod blob tree —
+  // previously cleanup wiped the real blobs because the path was hardcoded.
+  const root = process.env.A2A_BLOB_DIR ?? join(process.cwd(), "blobs");
+  return join(root, "workspace");
 }
 
 function blobPathFor(sha: string): string {
@@ -269,7 +272,7 @@ export function listFiles(snapshotId: string): WorkspaceFile[] {
 export function readFileAt(
   snapshotId: string,
   path: string,
-): { file: WorkspaceFile; content: Buffer } | null {
+): { file: WorkspaceFile; content: Buffer; missing?: boolean } | null {
   const norm = normalizeWorkspacePath(path);
   const row = db()
     .prepare(
@@ -278,7 +281,30 @@ export function readFileAt(
     )
     .get(snapshotId, norm) as WorkspaceFile | undefined;
   if (!row) return null;
-  return { file: row, content: getBlob(row.content_sha256) };
+  // Defensive: if the blob is missing on disk (disk loss, manual rm, test
+  // cleanup hitting prod paths in a misconfigured setup), return a placeholder
+  // instead of throwing — the workspace page can then render a clear warning
+  // rather than crash the whole route.
+  try {
+    return { file: row, content: getBlob(row.content_sha256) };
+  } catch (err) {
+    if (err instanceof Error && err.message === "Blob not found.") {
+      console.warn("workspace blob missing on disk", {
+        snapshot_id: snapshotId,
+        path: row.path,
+        sha: row.content_sha256,
+      });
+      return {
+        file: row,
+        content: Buffer.from(
+          `[content unavailable — blob ${row.content_sha256.slice(0, 12)} missing from disk]`,
+          "utf8",
+        ),
+        missing: true,
+      };
+    }
+    throw err;
+  }
 }
 
 // ---- patches ----------------------------------------------------------------

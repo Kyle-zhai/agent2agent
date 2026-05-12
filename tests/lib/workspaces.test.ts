@@ -1,7 +1,5 @@
 import { describe, it, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { rmSync, existsSync } from "node:fs";
-import { join } from "node:path";
 import { setupTestDb, teardownTestDb, resetTables } from "../helpers/setup";
 import { _resetDbForTests, db } from "../../lib/db";
 import { createAgentForUser } from "../../lib/agents";
@@ -29,18 +27,10 @@ before(() => {
 after(() => {
   Date.now = RealDateNow;
   _resetDbForTests();
+  // teardownTestDb() also wipes the per-test A2A_BLOB_DIR scratch tree,
+  // so no manual blob cleanup needed here. Previously this hardcoded
+  // `process.cwd()/blobs/workspace` and clobbered the real dev/prod tree.
   teardownTestDb();
-  // Best-effort: another test file may have written blobs concurrently.
-  // We don't fail the suite on cleanup since blob contents are content-
-  // addressed and harmless to leave between runs.
-  const blobs = join(process.cwd(), "blobs", "workspace");
-  if (existsSync(blobs)) {
-    try {
-      rmSync(blobs, { recursive: true, force: true });
-    } catch {
-      /* leave blobs for next test; they are content-addressed */
-    }
-  }
 });
 
 beforeEach(() => {
