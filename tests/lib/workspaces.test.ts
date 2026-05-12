@@ -30,8 +30,17 @@ after(() => {
   Date.now = RealDateNow;
   _resetDbForTests();
   teardownTestDb();
+  // Best-effort: another test file may have written blobs concurrently.
+  // We don't fail the suite on cleanup since blob contents are content-
+  // addressed and harmless to leave between runs.
   const blobs = join(process.cwd(), "blobs", "workspace");
-  if (existsSync(blobs)) rmSync(blobs, { recursive: true, force: true });
+  if (existsSync(blobs)) {
+    try {
+      rmSync(blobs, { recursive: true, force: true });
+    } catch {
+      /* leave blobs for next test; they are content-addressed */
+    }
+  }
 });
 
 beforeEach(() => {
