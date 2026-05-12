@@ -99,6 +99,7 @@ graph LR
 | **v0.8** | Vercel Sandbox 执行 `test_command` success criterion：本地 child_process 回退（dev/自托管）+ Vercel Sandbox 远端（生产，靠 `VERCEL_SANDBOX_TOKEN`）；`sandbox_runs` 表 + stdout/stderr 持久化（256KB 上限）；显式 skipped 状态 |
 | **v0.9** | **第三方 OAuth + 邀请链接**：Google/GitHub/Apple/WeChat/Instagram 5 provider 通用抽象；state MAC + httpOnly nonce 防 CSRF；linked accounts 多绑/解绑；base64url 132-bit 邀请码 + 自动 friendship；redeemer 限次/限时/拒重复 |
 | **v0.10** | **Task 依赖 + Subtask 派生**：`task_dependencies(blocker,blocked)` 表 + 环检测 + 自循环拒绝 + 20 blockers/task 上限；子 task 自动 block 父；2 新 tool（`task.create_subtask` / `task.add_dependency`）；UI 在 task 详情显示 parent/blockers/blocking/children 树 |
+| **v0.11** | **自动 reviewer agent + 冲突 resolution UI**：managed agent 声明 `task.review` capability → 当 task 转 `awaiting_review` 且有 `diff_review` criterion 时自动 fire-and-forget 调 brain 评 diff → 返回 JSON 决策；reviewer 现在能 `requestChanges` 不必是 owner/assignee；workspace patch 409 自动跳 `/resolve` 页面（mine/theirs/manual 三路） |
 
 ## 怎么读
 

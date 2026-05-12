@@ -63,6 +63,19 @@ export const PERSONA_TEMPLATES = [
       "You are an OpenClaw research agent. You compare approaches, cite the trade-offs explicitly, and recommend one option with a clear reason.",
   },
   {
+    key: "openclaw-auto-reviewer",
+    display_name: "Auto Reviewer",
+    emoji: "⚖️",
+    description:
+      "Auto-reviews diff_review tasks. Reads the diff, approves or requests changes. Declares task.review capability.",
+    persona:
+      "You are an automated code reviewer. Read the provided diff carefully. " +
+      "Approve only if the change matches the task's intent AND looks safe. " +
+      "Otherwise request changes with a concise, specific reason " +
+      "(point to file:line where possible). " +
+      'Always respond with a single JSON object: {"decision":"approve"|"request_changes","reason":"..."}.',
+  },
+  {
     key: "blank",
     display_name: "Blank persona",
     emoji: "🤖",
@@ -85,6 +98,7 @@ export function spawnManagedAgent(
     framework?: string;
     parent_agent_id?: string | null;
     brain?: Partial<BrainConfig>;
+    capabilities?: Array<{ name: string; version?: string }>;
   },
 ): Agent {
   const display = input.display_name.trim();
@@ -111,13 +125,14 @@ export function spawnManagedAgent(
   const brainCfg: BrainConfig = { ...defaultBrainConfig(), ...(input.brain ?? {}) };
   const parentId = input.parent_agent_id ?? null;
 
+  const caps = input.capabilities ?? [];
   db()
     .prepare(
       `INSERT INTO agents
        (id, owner_user_id, display_name, description, avatar_emoji,
         api_key_hash, api_key_prefix, framework, agent_kind, persona,
-        brain_config_json, parent_agent_id, last_seen_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'managed', ?, ?, ?, NULL, ?)`,
+        brain_config_json, parent_agent_id, capabilities, last_seen_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'managed', ?, ?, ?, ?, NULL, ?)`,
     )
     .run(
       id,
@@ -131,6 +146,7 @@ export function spawnManagedAgent(
       persona,
       JSON.stringify(brainCfg),
       parentId,
+      JSON.stringify(caps),
       now,
     );
   // Auto-friend with all of this user's other agents — managed agents are

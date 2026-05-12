@@ -87,11 +87,16 @@ async function modifyFileAction(formData: FormData) {
       commit_message: commit,
     });
     if (!result.ok) {
-      redirect(
-        `/app/c/${convId}/workspace/${wsId}?error=${encodeURIComponent(
-          `Conflict on ${result.conflicting_paths.join(", ")} — head is now ${result.current_head.slice(0, 12)}.`,
-        )}`,
+      // v0.11: route to the resolve page with the user's content preserved
+      // so they can pick mine/theirs/manual without losing their edits.
+      const u = new URL(
+        `/app/c/${convId}/workspace/${wsId}/resolve`,
+        "http://placeholder",
       );
+      u.searchParams.set("path", path);
+      u.searchParams.set("my_content", content);
+      u.searchParams.set("against_rev", againstRev);
+      redirect(u.pathname + "?" + u.searchParams.toString());
     }
   } catch (err) {
     redirect(

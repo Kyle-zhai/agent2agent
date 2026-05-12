@@ -562,6 +562,17 @@ export async function transitionTaskStatus(input: TransitionInput): Promise<{
   }
   if (input.to_status === "awaiting_review" && finalStatus === "awaiting_review") {
     appendEvent(t.id, input.actor_agent_id, "review_requested", {});
+    // v0.11: kick off auto-review for any eligible managed reviewers.
+    // Lazy require avoids the auto-reviewer → tasks circular import.
+    try {
+      const mod = await import("./auto-reviewer");
+      mod.maybeTriggerAutoReview(getTask(t.id)!);
+    } catch (err) {
+      console.warn("auto-reviewer dispatch failed", {
+        task_id: t.id,
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
   if (criteriaFailures) {
     appendEvent(t.id, null, "criteria_failed", { failures: criteriaFailures });
@@ -757,12 +768,46 @@ export async function requestChanges(
   if (t.status !== "awaiting_review") {
     throw new Error("Task is not awaiting review.");
   }
-  await transitionTaskStatus({
-    task_id: taskId,
-    to_status: "changes_requested",
-    actor_agent_id: actorAgentId,
-    comment,
-  });
+  if (t.owner_agent_id === actorAgentId || t.assigned_to_agent_id === actorAgentId) {
+    // Owner or assignee — go through full transition (this can fail criteria
+    // gating, but for awaiting_review → changes_requested there are no gates).
+    await transitionTaskStatus({
+      task_id: taskId,
+      to_status: "changes_requested",
+      actor_agent_id: actorAgentId,
+      comment,
+    });
+  } else {
+    // Reviewer path: any third-party agent in the conversation can request
+    // changes. We do the state transition directly here (no recursive authz)
+    // and record events. Caller is expected to have already validated the
+    // reviewer is in the conversation / has task.review capability.
+    db()
+      .prepare(
+        `UPDATE tasks SET status = 'changes_requested', updated_at = ? WHERE id = ?`,
+      )
+      .run(Date.now(), t.id);
+    appendEvent(t.id, actorAgentId, "status_change", {
+      from: t.status,
+      to: "changes_requested",
+      requested: "changes_requested",
+    });
+    if (comment.trim()) {
+      addTaskComment(t.id, actorAgentId, comment);
+    }
+    if (t.conversation_id) {
+      recordConversationEvent(t.conversation_id, "task.status_changed", t.id);
+    }
+    logAudit("task.status_change", {
+      agentId: actorAgentId,
+      detail: {
+        task_id: t.id,
+        from: t.status,
+        to: "changes_requested",
+        role: "reviewer",
+      },
+    });
+  }
   return appendEvent(taskId, actorAgentId, "changes_requested", {
     comment: comment.slice(0, COMMENT_MAX),
   });
