@@ -303,30 +303,37 @@ export function ConversationView({
                   convId={conv.id}
                 />
                 {conv.type === "group" && isGroupOwner ? (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowHeaderMenu(false);
-                        setShowRename(true);
-                      }}
-                      className="w-full text-left px-3 py-1.5 text-sm hover:bg-[color:var(--color-canvas)] flex items-center gap-2"
-                    >
-                      <span>✏️</span>
-                      <span>Rename group</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowHeaderMenu(false);
-                        setShowMembers(true);
-                      }}
-                      className="w-full text-left px-3 py-1.5 text-sm hover:bg-[color:var(--color-canvas)] flex items-center gap-2"
-                    >
-                      <span>👥</span>
-                      <span>Manage members</span>
-                    </button>
-                  </>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowHeaderMenu(false);
+                      setShowRename(true);
+                    }}
+                    className="w-full text-left px-3 py-1.5 text-sm hover:bg-[color:var(--color-canvas)] flex items-center gap-2"
+                  >
+                    <span>✏️</span>
+                    <span>Rename group</span>
+                  </button>
+                ) : null}
+                {conv.type === "group" ? (
+                  // v0.14: members panel is useful for any member (self-add,
+                  // request interconnect). The bar itself conditionally renders
+                  // owner-only forms — the panel is safe for non-owners.
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowHeaderMenu(false);
+                      setShowMembers(true);
+                    }}
+                    className="w-full text-left px-3 py-1.5 text-sm hover:bg-[color:var(--color-canvas)] flex items-center gap-2"
+                  >
+                    <span>👥</span>
+                    <span>
+                      {isGroupOwner
+                        ? "Manage members"
+                        : "Members & interconnect"}
+                    </span>
+                  </button>
                 ) : null}
                 {myManagedAgentsInRoom.length > 0 ? (
                   <button
@@ -597,26 +604,46 @@ function MemberManagerBar({
           </button>
         </div>
         <ul className="flex flex-wrap gap-1.5 mb-3">
-          {members.map((m) => (
-            <li key={m.id} className="inline-flex items-center gap-1.5 surface px-2 py-1 text-xs">
-              <span>{m.avatar_emoji}</span>
-              <span className="font-mono">{m.id}</span>
-              {m.id === ownerId ? <span className="tag tag-amber">owner</span> : null}
-              {m.id !== ownerId ? (
-                <form action={removeAction} className="contents">
-                  <input type="hidden" name="conversation_id" value={convId} />
-                  <input type="hidden" name="agent_id" value={m.id} />
-                  <button
-                    type="submit"
-                    title="Remove from group"
-                    className="text-[color:var(--color-ink-soft)] hover:text-[color:var(--color-danger)] ml-0.5"
-                  >
-                    ✕
-                  </button>
-                </form>
-              ) : null}
-            </li>
-          ))}
+          {members.map((m) => {
+            const isMyAgent = m.owner_user_id === myUserId;
+            // ✕ button: show only when the caller is allowed to remove this
+            // row — either the group owner, or the row IS the caller's own
+            // agent (self-leave). Hide otherwise so non-owners don't see a
+            // button that would always 403 server-side.
+            const canRemove =
+              (m.id !== ownerId && /* never delete the owner via this UI */
+                (members.find((mm) => mm.id === ownerId)?.owner_user_id ===
+                  myUserId)) ||
+              isMyAgent;
+            return (
+              <li
+                key={m.id}
+                className="inline-flex items-center gap-1.5 surface px-2 py-1 text-xs"
+              >
+                <span>{m.avatar_emoji}</span>
+                <span className="font-mono">{m.id}</span>
+                {m.id === ownerId ? (
+                  <span className="tag tag-amber">owner</span>
+                ) : null}
+                {isMyAgent && m.id !== ownerId ? (
+                  <span className="tag tag-blue">mine</span>
+                ) : null}
+                {canRemove && m.id !== ownerId ? (
+                  <form action={removeAction} className="contents">
+                    <input type="hidden" name="conversation_id" value={convId} />
+                    <input type="hidden" name="agent_id" value={m.id} />
+                    <button
+                      type="submit"
+                      title={isMyAgent ? "Pull this agent out" : "Remove from group"}
+                      className="text-[color:var(--color-ink-soft)] hover:text-[color:var(--color-danger)] ml-0.5"
+                    >
+                      ✕
+                    </button>
+                  </form>
+                ) : null}
+              </li>
+            );
+          })}
         </ul>
 
         {/* v0.14: any member can add their own agents into the group */}

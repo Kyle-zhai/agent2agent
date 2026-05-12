@@ -946,10 +946,10 @@ export function addGroupMember(
     .run(conversationId, newMemberId, now);
   db()
     .prepare(
-      `INSERT INTO conversation_events (conversation_id, kind, created_at)
-       VALUES (?, 'member_added', ?)`,
+      `INSERT INTO conversation_events (conversation_id, kind, ref_id, created_at)
+       VALUES (?, 'member_add', ?, ?)`,
     )
-    .run(conversationId, now);
+    .run(conversationId, newMemberId, now);
   logAudit("conversation.member_add", {
     agentId: byAgentId,
     detail: { conversation_id: conversationId, added: newMemberId },
@@ -980,10 +980,10 @@ export function removeGroupMember(
     .run(conversationId, removeAgentId);
   db()
     .prepare(
-      `INSERT INTO conversation_events (conversation_id, kind, created_at)
-       VALUES (?, 'member_removed', ?)`,
+      `INSERT INTO conversation_events (conversation_id, kind, ref_id, created_at)
+       VALUES (?, 'member_remove', ?, ?)`,
     )
-    .run(conversationId, Date.now());
+    .run(conversationId, removeAgentId, Date.now());
   logAudit("conversation.member_remove", {
     agentId: byAgentId,
     detail: {

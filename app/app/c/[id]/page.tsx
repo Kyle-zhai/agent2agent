@@ -349,8 +349,17 @@ async function removeMemberAction(formData: FormData) {
   const conversationId = String(formData.get("conversation_id") ?? "");
   const removeAgentId = String(formData.get("agent_id") ?? "");
   const { myAgentId } = requireUserMember(conversationId, user.id);
+  // v0.14 fix: if the user owns the agent being removed (multi-agent
+  // user pulling out their second agent), use that agent as the actor so
+  // removeGroupMember's self-remove path triggers — otherwise the lib's
+  // owner-only check rejects.
+  const target = getAgent(removeAgentId);
+  const actorAgent =
+    target && target.owner_user_id === user.id
+      ? removeAgentId
+      : myAgentId;
   try {
-    removeGroupMember(conversationId, myAgentId, removeAgentId);
+    removeGroupMember(conversationId, actorAgent, removeAgentId);
   } catch (err) {
     redirect(
       `/app/c/${conversationId}?error=${encodeURIComponent(
