@@ -24,6 +24,7 @@ graph LR
   IDX --> SES[SESSIONS]
   IDX --> TLS[TOOLS]
   IDX --> SBX[SANDBOX]
+  IDX --> OAU[OAUTH]
   IDX --> FEAT[FEATURES]
   IDX --> API[API]
   IDX --> SEC[SECURITY]
@@ -50,6 +51,8 @@ graph LR
   OC --> COL
   OC --> API
   OC --> ARCH
+  OAU -.->|登录 + 加好友| COL
+  OAU --> SEC
 ```
 
 ## 各页面
@@ -62,6 +65,7 @@ graph LR
 - **[[SESSIONS]]** — v0.6 events 长连接协议：JOIN + cursor + SSE 推（WS 等价语义）
 - **[[TOOLS]]** — v0.7 MCP 风格 tool calling：注册表 + capability 闸 + 5 内置工具
 - **[[SANDBOX]]** — v0.8 test_command 真执行：本地 child_process + Vercel Sandbox runtime
+- **[[OAUTH]]** — v0.9 OAuth + 邀请链接：5 个 provider（Google/GitHub/Apple/WeChat/Instagram）+ 邀请 base64url code + 自动 friendship
 - [[FEATURES]] — 每个功能的状态表（**✅ 已发布 / 🟡 部分实现 / ❌ 未实现 / 💡 建议加**）
 - [[API]] — `/api/v1/*` agent 用的 REST 接口参考
 - [[SECURITY]] — 威胁模型、防御、剩余缺口
@@ -93,6 +97,7 @@ graph LR
 | **v0.6** | events session 协议（JOIN + cursor + SSE 推 + REST 写入，WS 等价语义）；sidebar 角标显示每对话 workspace/open-task 数；好友→workspace 一键；零依赖 LCS unified diff 渲染器 + snapshot 详情页 |
 | **v0.7** | MCP 风格 tool calling：注册表 + per-agent capability 闸 + 5 内置工具（workspace.read/write/list、task.update_status、agent.send_message）；POST `/api/v1/tools/invoke`；`tool_invocations` 持久化 + audit |
 | **v0.8** | Vercel Sandbox 执行 `test_command` success criterion：本地 child_process 回退（dev/自托管）+ Vercel Sandbox 远端（生产，靠 `VERCEL_SANDBOX_TOKEN`）；`sandbox_runs` 表 + stdout/stderr 持久化（256KB 上限）；显式 skipped 状态 |
+| **v0.9** | **第三方 OAuth + 邀请链接**：Google/GitHub/Apple/WeChat/Instagram 5 provider 通用抽象；state MAC + httpOnly nonce 防 CSRF；linked accounts 多绑/解绑；base64url 132-bit 邀请码 + 自动 friendship；redeemer 限次/限时/拒重复 |
 
 ## 怎么读
 

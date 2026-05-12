@@ -19,6 +19,12 @@ import {
 import { createDirectConversation, listMembers } from "@/lib/conversations";
 import { db } from "@/lib/db";
 import { createWorkspace, subscribeAgent } from "@/lib/workspaces";
+import {
+  createInvite,
+  listInvitesForUser,
+  revokeInvite,
+} from "@/lib/invites";
+import { headers } from "next/headers";
 
 export const dynamic = "force-dynamic";
 
@@ -106,6 +112,44 @@ async function startWorkspaceAction(formData: FormData) {
   redirect(`/app/c/${convId}/workspace/${ws.id}`);
 }
 
+async function createInviteAction(formData: FormData) {
+  "use server";
+  const user = await requireUser();
+  const inviterAgentId = String(formData.get("inviter_agent_id") ?? "");
+  const note = String(formData.get("note") ?? "");
+  try {
+    createInvite({
+      user_id: user.id,
+      inviter_agent_id: inviterAgentId,
+      note,
+      max_uses: 1,
+    });
+  } catch (err) {
+    redirect(
+      `/app/contacts?error=${encodeURIComponent(
+        err instanceof Error ? err.message : "Could not create invite.",
+      )}`,
+    );
+  }
+  redirect("/app/contacts?ok=Invite+link+created");
+}
+
+async function revokeInviteAction(formData: FormData) {
+  "use server";
+  const user = await requireUser();
+  const id = String(formData.get("invite_id") ?? "");
+  try {
+    revokeInvite(user.id, id);
+  } catch (err) {
+    redirect(
+      `/app/contacts?error=${encodeURIComponent(
+        err instanceof Error ? err.message : "Could not revoke.",
+      )}`,
+    );
+  }
+  redirect("/app/contacts?ok=Invite+revoked");
+}
+
 async function rejectAction(formData: FormData) {
   "use server";
   const user = await requireUser();
@@ -132,6 +176,15 @@ export default async function ContactsPage({
 
   const myAgentIds = new Set(myAgents.map((a) => a.id));
   const friendIds = new Set(myAgents.flatMap((a) => listFriendsOfAgent(a.id)));
+  const invites = listInvitesForUser(user.id);
+  const h = await headers();
+  const host = h.get("host") ?? "localhost";
+  const proto =
+    process.env.NEXT_PUBLIC_APP_URL?.startsWith("https") ||
+    h.get("x-forwarded-proto") === "https"
+      ? "https"
+      : "http";
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? `${proto}://${host}`;
   const friends = Array.from(friendIds)
     .map((id) => getAgent(id))
     .filter((a): a is NonNullable<ReturnType<typeof getAgent>> => !!a);
@@ -164,6 +217,82 @@ export default async function ContactsPage({
           <span>⚠️</span>
           <span>{error}</span>
         </div>
+      ) : null}
+
+      {myAgents.length > 0 ? (
+        <section className="surface p-5 mb-8">
+          <h2 className="font-medium mb-1">Invite a human friend</h2>
+          <p className="text-xs text-[color:var(--color-ink-soft)] mb-3">
+            Generate a one-use link. Share it via WeChat/iMessage/whatever — the
+            recipient signs up (any provider works) and your agents become
+            friends automatically.
+          </p>
+          <form action={createInviteAction} className="space-y-2">
+            <div className="flex gap-2">
+              <select
+                name="inviter_agent_id"
+                className="input flex-1"
+                defaultValue={myAgents[0]?.id}
+              >
+                {myAgents.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    From {a.avatar_emoji} {a.display_name}
+                  </option>
+                ))}
+              </select>
+              <button type="submit" className="btn btn-primary btn-sm">
+                Generate link
+              </button>
+            </div>
+            <input
+              name="note"
+              maxLength={280}
+              placeholder="Optional note shown on the invite page (“Hey it's me, Bob”)"
+              className="input text-[13px]"
+            />
+          </form>
+
+          {invites.length > 0 ? (
+            <ul className="mt-4 space-y-2 text-[13px]">
+              {invites.map((inv) => {
+                const url = `${baseUrl}/invite/${inv.code}`;
+                const used = inv.used_count >= inv.max_uses;
+                const expired = inv.expires_at && inv.expires_at < Date.now();
+                return (
+                  <li
+                    key={inv.id}
+                    className="flex items-center justify-between gap-2 border-b border-[color:var(--color-line)] pb-2 last:border-0"
+                  >
+                    <div className="min-w-0">
+                      <code className="font-mono text-[11px] block truncate">
+                        {url}
+                      </code>
+                      <div className="text-[11px] text-[color:var(--color-ink-soft)]">
+                        {inv.used_count}/{inv.max_uses} used
+                        {inv.expires_at
+                          ? ` · expires ${new Date(inv.expires_at).toLocaleDateString()}`
+                          : ""}
+                        {used ? " · 🟢 redeemed" : ""}
+                        {expired ? " · ⌛ expired" : ""}
+                      </div>
+                      {inv.note ? (
+                        <div className="text-[11px] italic text-[color:var(--color-ink-soft)] truncate">
+                          “{inv.note}”
+                        </div>
+                      ) : null}
+                    </div>
+                    <form action={revokeInviteAction}>
+                      <input type="hidden" name="invite_id" value={inv.id} />
+                      <button type="submit" className="btn btn-ghost btn-sm">
+                        Revoke
+                      </button>
+                    </form>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
+        </section>
       ) : null}
 
       <section className="surface p-5 mb-8">

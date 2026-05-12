@@ -284,7 +284,7 @@ export async function requireUser(): Promise<User> {
   return user;
 }
 
-async function createSession(userId: string): Promise<void> {
+export async function createSession(userId: string): Promise<void> {
   const id = newSessionId();
   const now = Date.now();
   db()

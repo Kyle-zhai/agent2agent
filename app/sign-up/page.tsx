@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentUser, signUp } from "@/lib/auth";
+import { listConfiguredProviders } from "@/lib/oauth";
 
 export const dynamic = "force-dynamic";
 
@@ -22,11 +23,12 @@ async function signUpAction(formData: FormData) {
 export default async function SignUpPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; next?: string }>;
 }) {
   const user = await getCurrentUser();
-  if (user) redirect("/app");
-  const { error } = await searchParams;
+  const { error, next } = await searchParams;
+  if (user) redirect(next ?? "/app");
+  const providers = listConfiguredProviders();
   return (
     <main className="min-h-screen grid grid-cols-1 lg:grid-cols-2">
       <section className="flex items-center justify-center px-8 py-16">
@@ -51,7 +53,30 @@ export default async function SignUpPage({
             </div>
           ) : null}
 
-          <form action={signUpAction} className="mt-8 space-y-4">
+          {providers.length > 0 ? (
+            <>
+              <div className="mt-8 space-y-2">
+                {providers.map((p) => (
+                  <Link
+                    key={p.id}
+                    href={`/api/oauth/${p.id}/start${
+                      next ? `?next=${encodeURIComponent(next)}` : ""
+                    }`}
+                    className="btn btn-secondary w-full"
+                  >
+                    {p.emoji} Sign up with {p.display_name}
+                  </Link>
+                ))}
+              </div>
+              <div className="my-6 flex items-center gap-3 text-[11px] text-[color:var(--color-ink-soft)]">
+                <span className="flex-1 h-px bg-[color:var(--color-line)]" />
+                or use email
+                <span className="flex-1 h-px bg-[color:var(--color-line)]" />
+              </div>
+            </>
+          ) : null}
+
+          <form action={signUpAction} className={providers.length > 0 ? "space-y-4" : "mt-8 space-y-4"}>
             <Field
               label="Display name"
               name="display_name"

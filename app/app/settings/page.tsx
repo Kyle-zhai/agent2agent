@@ -3,6 +3,10 @@ import { redirect } from "next/navigation";
 import { requireUser, signOut } from "@/lib/auth";
 import { listAgentsForUser } from "@/lib/agents";
 import { listAuditForUser } from "@/lib/audit";
+import {
+  listConfiguredProviders,
+  listIdentitiesForUser,
+} from "@/lib/oauth";
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +50,9 @@ export default async function SettingsPage() {
   const user = await requireUser();
   const agents = listAgentsForUser(user.id);
   const audit = listAuditForUser(user.id, 50);
+  const identities = listIdentitiesForUser(user.id);
+  const providers = listConfiguredProviders();
+  const linkedSet = new Set(identities.map((i) => i.provider));
   return (
     <div className="max-w-2xl mx-auto px-10 py-12">
       <h1 className="text-3xl font-semibold tracking-tight">Settings</h1>
@@ -76,6 +83,95 @@ export default async function SettingsPage() {
           Edit profile
         </Link>
       </section>
+
+      {providers.length > 0 || identities.length > 0 ? (
+        <section className="mt-4 surface p-6">
+          <h2 className="font-medium mb-1">Linked accounts</h2>
+          <p className="text-xs text-[color:var(--color-ink-soft)] mb-3">
+            Sign in faster, recover your account, and let other A2A users invite you
+            via your handle on these networks.
+          </p>
+          <ul className="space-y-2">
+            {providers.map((p) => {
+              const linked = identities.find((i) => i.provider === p.id);
+              return (
+                <li
+                  key={p.id}
+                  className="flex items-center justify-between gap-3 py-2 border-b border-[color:var(--color-line)] last:border-0"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-lg">{p.emoji}</span>
+                    <div className="min-w-0">
+                      <div className="text-[13px] font-medium">
+                        {p.display_name}
+                      </div>
+                      {linked ? (
+                        <div className="text-[11px] text-[color:var(--color-ink-soft)] truncate">
+                          {linked.display_name}{" "}
+                          {linked.email ? `· ${linked.email}` : ""}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                  {linked ? (
+                    <form
+                      action={`/api/oauth/${p.id}/unlink`}
+                      method="post"
+                    >
+                      <button type="submit" className="btn btn-ghost btn-sm">
+                        Unlink
+                      </button>
+                    </form>
+                  ) : (
+                    <a
+                      href={`/api/oauth/${p.id}/start?mode=link`}
+                      className="btn btn-secondary btn-sm"
+                    >
+                      Link
+                    </a>
+                  )}
+                </li>
+              );
+            })}
+            {identities
+              .filter((i) => !providers.some((p) => p.id === i.provider))
+              .map((i) => (
+                <li
+                  key={i.id}
+                  className="flex items-center justify-between gap-3 py-2 border-b border-[color:var(--color-line)] last:border-0"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">🔗</span>
+                    <div>
+                      <div className="text-[13px] font-medium">
+                        {i.provider}
+                      </div>
+                      <div className="text-[11px] text-[color:var(--color-ink-soft)]">
+                        {i.display_name}{" "}
+                        {i.email ? `· ${i.email}` : ""}
+                      </div>
+                    </div>
+                  </div>
+                  <form action={`/api/oauth/${i.provider}/unlink`} method="post">
+                    <button type="submit" className="btn btn-ghost btn-sm">
+                      Unlink
+                    </button>
+                  </form>
+                </li>
+              ))}
+          </ul>
+          {linkedSet.size === 0 && providers.length === 0 ? (
+            <p className="text-[11px] text-[color:var(--color-ink-soft)] mt-2">
+              No OAuth providers configured on this server. Operator must set
+              <code className="font-mono"> A2A_OAUTH_*</code> env vars. See{" "}
+              <Link href="/docs/install" className="underline">
+                docs
+              </Link>
+              .
+            </p>
+          ) : null}
+        </section>
+      ) : null}
 
       <section className="mt-4 surface p-6">
         <h2 className="font-medium mb-3">Your data</h2>

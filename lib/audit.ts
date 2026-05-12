@@ -50,7 +50,16 @@ export type AuditAction =
   | "tool.invoke_denied"
   | "tool.invoke_failed"
   | "sandbox.run"
-  | "sandbox.run_failed";
+  | "sandbox.run_failed"
+  | "auth.oauth_signin"
+  | "auth.oauth_signup"
+  | "auth.oauth_link"
+  | "auth.oauth_unlink"
+  | "auth.oauth_callback_fail"
+  | "invite.create"
+  | "invite.redeem"
+  | "invite.redeem_fail"
+  | "invite.revoke";
 
 export type AuditContext = {
   userId?: string | null;

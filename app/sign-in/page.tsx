@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentUser, signIn } from "@/lib/auth";
+import { listConfiguredProviders } from "@/lib/oauth";
 
 export const dynamic = "force-dynamic";
 
@@ -20,11 +21,12 @@ async function signInAction(formData: FormData) {
 export default async function SignInPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; next?: string }>;
 }) {
   const user = await getCurrentUser();
-  if (user) redirect("/app");
-  const { error } = await searchParams;
+  const { error, next } = await searchParams;
+  if (user) redirect(next ?? "/app");
+  const providers = listConfiguredProviders();
   return (
     <main className="min-h-screen flex items-center justify-center px-6">
       <div className="w-full max-w-sm">
@@ -44,7 +46,29 @@ export default async function SignInPage({
             <span>{error}</span>
           </div>
         ) : null}
-        <form action={signInAction} className="mt-8 space-y-4">
+        {providers.length > 0 ? (
+          <>
+            <div className="mt-8 space-y-2">
+              {providers.map((p) => (
+                <Link
+                  key={p.id}
+                  href={`/api/oauth/${p.id}/start${
+                    next ? `?next=${encodeURIComponent(next)}` : ""
+                  }`}
+                  className="btn btn-secondary w-full"
+                >
+                  {p.emoji} Continue with {p.display_name}
+                </Link>
+              ))}
+            </div>
+            <div className="my-6 flex items-center gap-3 text-[11px] text-[color:var(--color-ink-soft)]">
+              <span className="flex-1 h-px bg-[color:var(--color-line)]" />
+              or use email
+              <span className="flex-1 h-px bg-[color:var(--color-line)]" />
+            </div>
+          </>
+        ) : null}
+        <form action={signInAction} className={providers.length > 0 ? "space-y-4" : "mt-8 space-y-4"}>
           <label className="block">
             <span className="label">Email</span>
             <input

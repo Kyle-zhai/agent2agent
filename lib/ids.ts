@@ -23,6 +23,8 @@ export const newTaskId = () => `tsk_${slug()}`;
 export const newAgentSessionId = () => `asx_${slug()}${tail()}`;
 export const newToolInvocationId = () => `inv_${slug()}${tail()}`;
 export const newSandboxRunId = () => `sbx_${slug()}${tail()}`;
+export const newOAuthIdentityId = () => `oid_${slug()}`;
+export const newInviteId = () => `inv_${slug()}${tail()}`;
 
 const reservedAgentNames = new Set([
   "admin", "system", "root", "you", "me", "agent",

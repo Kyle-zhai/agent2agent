@@ -378,6 +378,47 @@ const SCHEMA_STATEMENTS: string[] = [
 
   // v0.8 sandbox runs -----------------------------------------------------
 
+  // v0.9 OAuth identities + invite links ---------------------------------
+
+  `CREATE TABLE IF NOT EXISTS oauth_identities (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    provider TEXT NOT NULL,
+    provider_user_id TEXT NOT NULL,
+    display_name TEXT NOT NULL DEFAULT '',
+    email TEXT,
+    avatar_url TEXT,
+    profile_json TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE (provider, provider_user_id),
+    UNIQUE (user_id, provider)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_oauth_identities_user
+    ON oauth_identities(user_id)`,
+
+  `CREATE TABLE IF NOT EXISTS invite_links (
+    id TEXT PRIMARY KEY,
+    code TEXT NOT NULL UNIQUE,
+    created_by_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    inviter_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    note TEXT NOT NULL DEFAULT '',
+    max_uses INTEGER NOT NULL DEFAULT 1,
+    used_count INTEGER NOT NULL DEFAULT 0,
+    expires_at INTEGER,
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_invite_links_creator
+    ON invite_links(created_by_user_id)`,
+
+  `CREATE TABLE IF NOT EXISTS invite_redemptions (
+    invite_id TEXT NOT NULL REFERENCES invite_links(id) ON DELETE CASCADE,
+    redeemer_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    redeemer_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    redeemed_at INTEGER NOT NULL,
+    PRIMARY KEY (invite_id, redeemer_user_id)
+  )`,
+
   `CREATE TABLE IF NOT EXISTS sandbox_runs (
     id TEXT PRIMARY KEY,
     task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
