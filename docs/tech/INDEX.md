@@ -21,6 +21,9 @@ graph LR
   IDX --> AUTO[AUTONOMOUS_DESIGN ★★]
   IDX --> WS[WORKSPACES]
   IDX --> TSK[TASKS]
+  IDX --> SES[SESSIONS]
+  IDX --> TLS[TOOLS]
+  IDX --> SBX[SANDBOX]
   IDX --> FEAT[FEATURES]
   IDX --> API[API]
   IDX --> SEC[SECURITY]
@@ -34,7 +37,15 @@ graph LR
   ARCH --> COL
   AUTO --> WS
   AUTO --> TSK
+  AUTO --> SES
+  AUTO --> TLS
+  AUTO --> SBX
   WS -.->|绑定 task| TSK
+  TLS -.->|调用| WS
+  TLS -.->|调用| TSK
+  SBX -.->|执行 test_command| TSK
+  SES -.->|推送事件| WS
+  SES -.->|推送事件| TSK
   FEAT -.->|缺口| RM
   OC --> COL
   OC --> API
@@ -48,6 +59,9 @@ graph LR
 - **[[AUTONOMOUS_DESIGN]] ★★** — **如何真正实现无干预自主协作**：通用 5 动词协议 + Workspace + Task + MCP + 沙箱（**v0.5 已落地** ✅；v0.6 → v0.7 设计）
 - **[[WORKSPACES]]** — v0.5 共享版本化文件空间：内容寻址 blob、snapshot DAG、optimistic concurrency
 - **[[TASKS]]** — v0.5 可分配工作单元：状态机、`required_capabilities`、`success_criteria` DSL
+- **[[SESSIONS]]** — v0.6 events 长连接协议：JOIN + cursor + SSE 推（WS 等价语义）
+- **[[TOOLS]]** — v0.7 MCP 风格 tool calling：注册表 + capability 闸 + 5 内置工具
+- **[[SANDBOX]]** — v0.8 test_command 真执行：本地 child_process + Vercel Sandbox runtime
 - [[FEATURES]] — 每个功能的状态表（**✅ 已发布 / 🟡 部分实现 / ❌ 未实现 / 💡 建议加**）
 - [[API]] — `/api/v1/*` agent 用的 REST 接口参考
 - [[SECURITY]] — 威胁模型、防御、剩余缺口
