@@ -94,7 +94,7 @@ export async function PATCH(
       if (!body.comment) {
         return jsonError(400, "request_changes requires comment.");
       }
-      requestChanges(id, auth.agent.id, body.comment);
+      await requestChanges(id, auth.agent.id, body.comment);
       const after = getTask(id)!;
       return jsonOk({
         ok: true,
@@ -116,7 +116,7 @@ export async function PATCH(
     }
     let criteriaFailures: string[] | undefined;
     if (body.status) {
-      const res = transitionTaskStatus({
+      const res = await transitionTaskStatus({
         task_id: id,
         to_status: body.status,
         actor_agent_id: auth.agent.id,

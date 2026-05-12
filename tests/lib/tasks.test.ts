@@ -64,16 +64,15 @@ describe("task state machine", () => {
     assert.equal(isTransitionAllowed("in_progress", "done"), false);
   });
 
-  it("rejects illegal transition through the public API", () => {
+  it("rejects illegal transition through the public API", async () => {
     const owner = seedAgent("usr_o", "owner");
     const t = createTask({ title: "x", owner_agent_id: owner.id });
-    assert.throws(
-      () =>
-        transitionTaskStatus({
-          task_id: t.id,
-          to_status: "done",
-          actor_agent_id: owner.id,
-        }),
+    await assert.rejects(
+      transitionTaskStatus({
+        task_id: t.id,
+        to_status: "done",
+        actor_agent_id: owner.id,
+      }),
       /Illegal status transition/,
     );
   });
@@ -113,7 +112,7 @@ describe("capability gating", () => {
 });
 
 describe("comments + events", () => {
-  it("records created + assigned + comment events", () => {
+  it("records created + assigned + comment events", async () => {
     const owner = seedAgent("usr_o", "owner");
     const bob = seedAgent("usr_b", "bob");
     const t = createTask({
@@ -121,7 +120,7 @@ describe("comments + events", () => {
       owner_agent_id: owner.id,
       assigned_to_agent_id: bob.id,
     });
-    transitionTaskStatus({
+    await transitionTaskStatus({
       task_id: t.id,
       to_status: "in_progress",
       actor_agent_id: bob.id,
@@ -137,7 +136,7 @@ describe("comments + events", () => {
 });
 
 describe("success_criteria — capability_check", () => {
-  it("downgrades 'done' to 'changes_requested' if criteria fail", () => {
+  it("downgrades 'done' to 'changes_requested' if criteria fail", async () => {
     const owner = seedAgent("usr_o", "owner");
     const bob = seedAgent("usr_b", "bob");
     setAgentCapabilities(bob.id, "usr_b", [
@@ -152,17 +151,17 @@ describe("success_criteria — capability_check", () => {
         { type: "capability_check", must_include: ["shell.run"] },
       ],
     });
-    transitionTaskStatus({
+    await transitionTaskStatus({
       task_id: t.id,
       to_status: "in_progress",
       actor_agent_id: bob.id,
     });
-    transitionTaskStatus({
+    await transitionTaskStatus({
       task_id: t.id,
       to_status: "awaiting_review",
       actor_agent_id: bob.id,
     });
-    const res = transitionTaskStatus({
+    const res = await transitionTaskStatus({
       task_id: t.id,
       to_status: "done",
       actor_agent_id: bob.id,
@@ -172,7 +171,7 @@ describe("success_criteria — capability_check", () => {
     assert.ok(res.criteria_failures && res.criteria_failures.length > 0);
   });
 
-  it("passes 'done' when capability_check is satisfied", () => {
+  it("passes 'done' when capability_check is satisfied", async () => {
     const owner = seedAgent("usr_o", "owner");
     const bob = seedAgent("usr_b", "bob");
     setAgentCapabilities(bob.id, "usr_b", [
@@ -188,17 +187,17 @@ describe("success_criteria — capability_check", () => {
         { type: "capability_check", must_include: ["shell.run"] },
       ],
     });
-    transitionTaskStatus({
+    await transitionTaskStatus({
       task_id: t.id,
       to_status: "in_progress",
       actor_agent_id: bob.id,
     });
-    transitionTaskStatus({
+    await transitionTaskStatus({
       task_id: t.id,
       to_status: "awaiting_review",
       actor_agent_id: bob.id,
     });
-    transitionTaskStatus({
+    await transitionTaskStatus({
       task_id: t.id,
       to_status: "done",
       actor_agent_id: bob.id,
@@ -208,7 +207,7 @@ describe("success_criteria — capability_check", () => {
 });
 
 describe("success_criteria — diff_pattern", () => {
-  it("blocks done when forbidden pattern present, accepts when removed", () => {
+  it("blocks done when forbidden pattern present, accepts when removed", async () => {
     const owner = seedAgent("usr_o", "owner");
     const bob = seedAgent("usr_b", "bob");
     const ws = createWorkspace({
@@ -241,13 +240,13 @@ describe("success_criteria — diff_pattern", () => {
       required_capabilities: ["workspace.write"],
       success_criteria: [{ type: "diff_pattern", forbidden: ["console\\.log"] }],
     });
-    transitionTaskStatus({ task_id: t.id, to_status: "in_progress", actor_agent_id: bob.id });
-    transitionTaskStatus({
+    await transitionTaskStatus({ task_id: t.id, to_status: "in_progress", actor_agent_id: bob.id });
+    await transitionTaskStatus({
       task_id: t.id,
       to_status: "awaiting_review",
       actor_agent_id: bob.id,
     });
-    const blocked = transitionTaskStatus({
+    const blocked = await transitionTaskStatus({
       task_id: t.id,
       to_status: "done",
       actor_agent_id: bob.id,
@@ -263,17 +262,17 @@ describe("success_criteria — diff_pattern", () => {
       ops: [{ path: "src/a.ts", op: "modify", content: "// clean code" }],
     });
     if (!fix.ok) return assert.fail("fix patch should succeed");
-    transitionTaskStatus({
+    await transitionTaskStatus({
       task_id: t.id,
       to_status: "in_progress",
       actor_agent_id: bob.id,
     });
-    transitionTaskStatus({
+    await transitionTaskStatus({
       task_id: t.id,
       to_status: "awaiting_review",
       actor_agent_id: bob.id,
     });
-    transitionTaskStatus({
+    await transitionTaskStatus({
       task_id: t.id,
       to_status: "done",
       actor_agent_id: bob.id,
@@ -284,10 +283,10 @@ describe("success_criteria — diff_pattern", () => {
 });
 
 describe("approveTask", () => {
-  it("owner cannot self-approve", () => {
+  it("owner cannot self-approve", async () => {
     const owner = seedAgent("usr_o", "owner");
     const t = createTask({ title: "x", owner_agent_id: owner.id });
-    transitionTaskStatus({ task_id: t.id, to_status: "assigned", actor_agent_id: owner.id });
+    await transitionTaskStatus({ task_id: t.id, to_status: "assigned", actor_agent_id: owner.id });
     // Can't transition further without assignee, but we want to test approval path
     // Manually mark as awaiting_review via legitimate path:
     db()

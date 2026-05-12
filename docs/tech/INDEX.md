@@ -76,6 +76,9 @@ graph LR
 | **v0.4.3 – v0.4.7** | 多轮自审落地：security/silent-failure/类型/文档差异修复 + 测试脚手架（18 项 passing）+ 收尾 nit |
 | **v0.5** | **自主协作底座**：workspace（内容寻址 + snapshot DAG）+ task（状态机 + capabilities + success_criteria DSL）+ 8 个新 REST 端点 + 4 个新 install skill + 19 项新测试 |
 | **v0.5.1** | workspace/task → `conversation_events` SSE 桥接；heartbeat 返回 `pending_tasks` + `subscribed_workspaces`；自适应间隔感知 task 待办；demo seed 含跨用户共享 workspace + 已指派 task（Alice → Bob）|
+| **v0.6** | events session 协议（JOIN + cursor + SSE 推 + REST 写入，WS 等价语义）；sidebar 角标显示每对话 workspace/open-task 数；好友→workspace 一键；零依赖 LCS unified diff 渲染器 + snapshot 详情页 |
+| **v0.7** | MCP 风格 tool calling：注册表 + per-agent capability 闸 + 5 内置工具（workspace.read/write/list、task.update_status、agent.send_message）；POST `/api/v1/tools/invoke`；`tool_invocations` 持久化 + audit |
+| **v0.8** | Vercel Sandbox 执行 `test_command` success criterion：本地 child_process 回退（dev/自托管）+ Vercel Sandbox 远端（生产，靠 `VERCEL_SANDBOX_TOKEN`）；`sandbox_runs` 表 + stdout/stderr 持久化（256KB 上限）；显式 skipped 状态 |
 
 ## 怎么读
 

@@ -15,6 +15,7 @@ import {
   listFiles,
   readFileAt,
 } from "./workspaces";
+import { runSandbox } from "./sandbox";
 import type {
   SuccessCriterion,
   Task,
@@ -475,10 +476,10 @@ export type TransitionInput = {
   result_snapshot_id?: string | null;
 };
 
-export function transitionTaskStatus(input: TransitionInput): {
+export async function transitionTaskStatus(input: TransitionInput): Promise<{
   task: Task;
   criteria_failures?: string[];
-} {
+}> {
   const t = getTask(input.task_id);
   if (!t) throw new Error("Task not found.");
   if (!isTransitionAllowed(t.status, input.to_status)) {
@@ -500,7 +501,7 @@ export function transitionTaskStatus(input: TransitionInput): {
 
   // On "done" enforce success criteria.
   if (input.to_status === "done") {
-    const evalRes = evaluateSuccessCriteria(t, {
+    const evalRes = await evaluateSuccessCriteria(t, {
       actor_agent_id: input.actor_agent_id,
       result_snapshot_id: resultSnap,
     });
@@ -557,10 +558,10 @@ export function transitionTaskStatus(input: TransitionInput): {
 
 type CriteriaResult = { ok: true } | { ok: false; failures: string[] };
 
-export function evaluateSuccessCriteria(
+export async function evaluateSuccessCriteria(
   task: Task,
   ctx: { actor_agent_id: string; result_snapshot_id: string | null },
-): CriteriaResult {
+): Promise<CriteriaResult> {
   let criteria: SuccessCriterion[] = [];
   try {
     criteria = JSON.parse(task.success_criteria);
@@ -569,17 +570,17 @@ export function evaluateSuccessCriteria(
   }
   const failures: string[] = [];
   for (const c of criteria) {
-    const res = evaluateOne(c, task, ctx);
+    const res = await evaluateOne(c, task, ctx);
     if (!res.ok) failures.push(res.reason);
   }
   return failures.length === 0 ? { ok: true } : { ok: false, failures };
 }
 
-function evaluateOne(
+async function evaluateOne(
   c: SuccessCriterion,
   task: Task,
   ctx: { actor_agent_id: string; result_snapshot_id: string | null },
-): { ok: true } | { ok: false; reason: string } {
+): Promise<{ ok: true } | { ok: false; reason: string }> {
   switch (c.type) {
     case "capability_check": {
       const actor = getAgent(ctx.actor_agent_id);
@@ -668,12 +669,41 @@ function evaluateOne(
           };
     }
     case "test_command": {
-      // v0.5 cannot execute commands (sandbox arrives in v0.6).
-      // We surface this as an explicit failure rather than silently passing.
-      return {
-        ok: false,
-        reason: `test_command not executed in v0.5 (sandbox lands in v0.6)`,
-      };
+      const snapId = ctx.result_snapshot_id ?? task.result_snapshot_id;
+      if (!snapId) {
+        return {
+          ok: false,
+          reason: "test_command: no result_snapshot_id to mount in sandbox",
+        };
+      }
+      try {
+        const run = await runSandbox({
+          cmd: c.cmd,
+          shell: (c.shell as "bash" | "sh" | undefined) ?? "bash",
+          snapshot_id: snapId,
+          task_id: task.id,
+          initiated_by_agent_id: ctx.actor_agent_id,
+        });
+        if (run.runtime === "skipped") {
+          return {
+            ok: false,
+            reason: `test_command skipped: ${run.reason ?? "sandbox disabled"}`,
+          };
+        }
+        if (run.exit_code === 0) {
+          return { ok: true };
+        }
+        const tail = (run.stderr || run.stdout || "").trim().slice(-200);
+        return {
+          ok: false,
+          reason: `test_command "${c.cmd}" exit=${run.exit_code}${tail ? " — " + tail : ""}`,
+        };
+      } catch (err) {
+        return {
+          ok: false,
+          reason: `test_command threw: ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
     }
     default:
       return { ok: false, reason: `unknown criterion type` };
@@ -695,17 +725,17 @@ export function approveTask(taskId: string, actorAgentId: string): TaskEvent {
   return appendEvent(taskId, actorAgentId, "approved", {});
 }
 
-export function requestChanges(
+export async function requestChanges(
   taskId: string,
   actorAgentId: string,
   comment: string,
-): TaskEvent {
+): Promise<TaskEvent> {
   const t = getTask(taskId);
   if (!t) throw new Error("Task not found.");
   if (t.status !== "awaiting_review") {
     throw new Error("Task is not awaiting review.");
   }
-  transitionTaskStatus({
+  await transitionTaskStatus({
     task_id: taskId,
     to_status: "changes_requested",
     actor_agent_id: actorAgentId,

@@ -402,26 +402,42 @@ sequenceDiagram
 
 详见 [[WORKSPACES]]、[[TASKS]]。
 
-### v0.6 —— 通用协议 + MCP + 沙箱（约 2 周）
+### v0.6 —— Events session 协议（已落地 ✅）
 
-- [ ] `/api/v1/sessions` JOIN + cursor-based event delivery
-- [ ] WebSocket 通道 `/api/v1/ws`（共用 session）
-- [ ] MCP server 注册表 + per-agent allowlist
-- [ ] Vercel Sandbox 集成（managed agent 跑 shell.run）
-- [ ] 5 动词的 OpenAPI / AsyncAPI 公开规格
-- [ ] OAuth-style fine-grained token（scope: workspace + task + capability）
+- [x] `POST /api/v1/sessions` JOIN + cursor-based event delivery
+- [x] `GET /api/v1/sessions/:id/events?since=cursor` PULL_EVENTS
+- [x] `GET /api/v1/sessions/:id/stream` SSE 推（WS 等价语义，自托管 SQLite 模型下不引入新 server）
+- [x] `DELETE /api/v1/sessions/:id` 关闭
+- [x] Resumable session：cursor 持久化、agent 重连自动 catch-up
+- [x] Audit: `session.create` / `session.close`
+- [x] install.md 加 `session_stream.sh` 长跑脚本
+- [x] sidebar 角标 + 好友→workspace 一键 + unified diff 渲染（UX 补齐）
+- [ ] 真 WebSocket（需要切自定义 Node server，留给迁 Vercel + Workflow 时做）
+- [ ] OAuth-style fine-grained token
 - [ ] 出站 webhooks（HMAC 签名）
-- [ ] Resumable session：cursor-based replay
-- [ ] 限流给新动词加 bucket
 
-### v0.7 —— 自主审 + 工作流（约 1 周）
+### v0.7 —— MCP 风格 tool calling（已落地 ✅）
 
-- [ ] `success_criteria` DSL 解释器
-- [ ] 自动 merge if criteria pass
-- [ ] Reviewer agent 模板（用 brain 跑自动审）
-- [ ] Conflict resolution UI + 协议（patch 冲突时的 rebase 流程）
-- [ ] Task 依赖（parent / child + blocked_by）
-- [ ] Subtask 自动派生（一个 task 可拆给多个 agent 并行）
+- [x] 工具注册表 + per-agent capability allowlist
+- [x] 5 内置工具：workspace.read_file / write_file / list_files / task.update_status / agent.send_message
+- [x] JSON schema 暴露：`GET /api/v1/tools`
+- [x] 单一入口：`POST /api/v1/tools/invoke { tool, args, task_id? }`
+- [x] `tool_invocations` 持久化（duration, result, error） + audit (tool.invoke / invoke_denied / invoke_failed)
+- [ ] agent 自带 MCP server 反向调用（"reverse RPC" via session SSE — 见 §4.5）
+
+### v0.8 —— Vercel Sandbox 跑 test_command（已落地 ✅）
+
+- [x] `lib/sandbox.ts` 两种 runtime：本地 `child_process`（dev/自托管 fallback）+ Vercel Sandbox（`VERCEL_SANDBOX_TOKEN` 触发）
+- [x] snapshot 文件 → 临时目录 materialize → 执行 → 抓 stdout/stderr/exit
+- [x] 256KB 输出截断、60s 默认 timeout、最小化 env（PATH/HOME/TMPDIR/LANG）
+- [x] `sandbox_runs` 表持久化每次执行
+- [x] `success_criteria.test_command` 真去跑：exit=0 → pass，其它 → fail 含 stderr tail
+- [x] `A2A_SANDBOX_DISABLE=1` 显式停用（返回 skipped runtime）
+- [x] Audit: `sandbox.run` / `sandbox.run_failed`
+- [ ] 自动 reviewer agent 模板（用 brain 跑自动审）—— v0.9
+- [ ] Conflict resolution UI + 协议 —— v0.9
+- [ ] Task 依赖（parent / child + blocked_by） —— v0.9
+- [ ] Subtask 自动派生 —— v0.9
 
 ## 11. 兼容性与迁移
 

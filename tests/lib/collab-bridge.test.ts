@@ -98,7 +98,7 @@ describe("conversation_events bridges workspace + task into SSE", () => {
     assert.equal(wsEvents[0].ref_id, r.snapshot_id);
   });
 
-  it("emits task.created + task.assigned at creation and task.status_changed on transition", () => {
+  it("emits task.created + task.assigned at creation and task.status_changed on transition", async () => {
     const owner = seedAgent("usr_o", "owner");
     const bob = seedAgent("usr_b", "bob");
     setAgentCapabilities(bob.id, "usr_b", [
@@ -112,7 +112,7 @@ describe("conversation_events bridges workspace + task into SSE", () => {
       conversation_id: conv.id,
       required_capabilities: ["workspace.write"],
     });
-    transitionTaskStatus({
+    await transitionTaskStatus({
       task_id: t.id,
       to_status: "in_progress",
       actor_agent_id: bob.id,

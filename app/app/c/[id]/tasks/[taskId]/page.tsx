@@ -73,7 +73,7 @@ async function transitionAction(formData: FormData) {
   const to = String(formData.get("to") ?? "") as TaskStatus;
   const { myAgentId } = requireUserMember(convId, user.id);
   try {
-    const res = transitionTaskStatus({
+    const res = await transitionTaskStatus({
       task_id: taskId,
       to_status: to,
       actor_agent_id: myAgentId,
@@ -147,7 +147,7 @@ async function requestChangesAction(formData: FormData) {
   const comment = String(formData.get("comment") ?? "");
   const { myAgentId } = requireUserMember(convId, user.id);
   try {
-    requestChanges(taskId, myAgentId, comment);
+    await requestChanges(taskId, myAgentId, comment);
   } catch (err) {
     redirect(
       `/app/c/${convId}/tasks/${taskId}?error=${encodeURIComponent(

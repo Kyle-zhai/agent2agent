@@ -244,7 +244,7 @@ const taskUpdateStatus: Tool = {
     ) {
       throw new Error("not owner or assignee");
     }
-    const r = transitionTaskStatus({
+    const r = await transitionTaskStatus({
       task_id: t.id,
       to_status: toStatus,
       actor_agent_id: ctx.agent.id,
