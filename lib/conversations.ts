@@ -847,6 +847,66 @@ export function setGroupTitle(
   });
 }
 
+/** v0.14: any user who has at least one agent already in the group can
+ *  add ONE OF THEIR OWN agents. Does not require owner — the constraint
+ *  is "you can self-include your stable", not "you control the room".
+ *  Friendship between the new agent and an existing member is NOT
+ *  required (the user already has another agent in the room, so the
+ *  social proximity is established at the user level). */
+export function addOwnAgentToGroup(input: {
+  conversation_id: string;
+  user_id: string;
+  agent_id: string;
+}): void {
+  const conv = getConversation(input.conversation_id);
+  if (!conv) throw new Error("Conversation not found.");
+  if (conv.type !== "group") throw new Error("Only groups can add members.");
+  const agent = getAgentOwnedBy(input.agent_id, input.user_id);
+  if (!agent) throw new Error("That isn't your agent.");
+
+  // The user must already have at least one of their own agents in the room.
+  const myAgentsInRoom = db()
+    .prepare(
+      `SELECT cm.agent_id FROM conversation_members cm
+       JOIN agents a ON a.id = cm.agent_id
+       WHERE cm.conversation_id = ? AND a.owner_user_id = ?`,
+    )
+    .all(input.conversation_id, input.user_id) as Array<{ agent_id: string }>;
+  if (myAgentsInRoom.length === 0) {
+    throw new Error("You're not in this group yet.");
+  }
+
+  const existing = db()
+    .prepare(
+      "SELECT 1 FROM conversation_members WHERE conversation_id = ? AND agent_id = ?",
+    )
+    .get(input.conversation_id, input.agent_id);
+  if (existing) throw new Error("Already a member.");
+
+  const memberCount = (
+    db()
+      .prepare("SELECT COUNT(*) AS n FROM conversation_members WHERE conversation_id = ?")
+      .get(input.conversation_id) as { n: number }
+  ).n;
+  if (memberCount >= MAX_GROUP_SIZE) {
+    throw new Error(`Max ${MAX_GROUP_SIZE} members per group.`);
+  }
+
+  const now = Date.now();
+  db()
+    .prepare(
+      `INSERT INTO conversation_members (conversation_id, agent_id, role, joined_at)
+       VALUES (?, ?, 'member', ?)`,
+    )
+    .run(input.conversation_id, input.agent_id, now);
+  db()
+    .prepare(
+      `INSERT INTO conversation_events (conversation_id, kind, ref_id, created_at)
+       VALUES (?, 'member_add', ?, ?)`,
+    )
+    .run(input.conversation_id, input.agent_id, now);
+}
+
 export function addGroupMember(
   conversationId: string,
   byAgentId: string,

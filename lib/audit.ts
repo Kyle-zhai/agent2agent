@@ -72,7 +72,12 @@ export type AuditAction =
   | "debate.started"
   | "debate.finished"
   | "debate.failed"
-  | "task.split";
+  | "task.split"
+  | "agent_link.request"
+  | "agent_link.accept"
+  | "agent_link.decline"
+  | "agent_link.revoke"
+  | "conversation.self_member_add";
 
 export type AuditContext = {
   userId?: string | null;

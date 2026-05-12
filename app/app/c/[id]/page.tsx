@@ -1,9 +1,10 @@
 import { notFound, redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth";
-import { getAgent } from "@/lib/agents";
+import { getAgent, listAgentsForUser } from "@/lib/agents";
 import {
   addGroupMember,
+  addOwnAgentToGroup,
   deleteMessage,
   editMessage,
   forwardMessage,
@@ -28,6 +29,14 @@ import {
   toggleReaction,
 } from "@/lib/conversations";
 import { listFriendsOfAgent } from "@/lib/friends";
+import {
+  listLinksForConversation,
+  requestAgentLink,
+  respondAgentLink,
+  revokeAgentLink,
+} from "@/lib/agent-links";
+import { listWorkspacesForConversation } from "@/lib/workspaces";
+import { listTasksForConversation } from "@/lib/tasks";
 import { ensureManagedAgentHooks } from "@/lib/managed-agents-init";
 import { ConversationView } from "@/components/ConversationView";
 import type { ReactionAggregate } from "@/lib/types";
@@ -235,6 +244,105 @@ async function addMemberAction(formData: FormData) {
   redirect(`/app/c/${conversationId}`);
 }
 
+async function addOwnAgentAction(formData: FormData) {
+  "use server";
+  const user = await requireUser();
+  const conversationId = String(formData.get("conversation_id") ?? "");
+  const myNewAgentId = String(formData.get("agent_id") ?? "");
+  requireUserMember(conversationId, user.id);
+  try {
+    addOwnAgentToGroup({
+      conversation_id: conversationId,
+      user_id: user.id,
+      agent_id: myNewAgentId,
+    });
+    const { logAudit } = await import("@/lib/audit");
+    logAudit("conversation.self_member_add", {
+      userId: user.id,
+      agentId: myNewAgentId,
+      detail: { conversation_id: conversationId },
+    });
+  } catch (err) {
+    redirect(
+      `/app/c/${conversationId}?error=${encodeURIComponent(
+        err instanceof Error ? err.message : "Add failed.",
+      )}`,
+    );
+  }
+  revalidatePath("/app", "layout");
+  redirect(`/app/c/${conversationId}`);
+}
+
+async function requestLinkAction(formData: FormData) {
+  "use server";
+  const user = await requireUser();
+  const conversationId = String(formData.get("conversation_id") ?? "");
+  const myAgent = String(formData.get("my_agent_id") ?? "");
+  const theirAgent = String(formData.get("their_agent_id") ?? "");
+  requireUserMember(conversationId, user.id);
+  try {
+    requestAgentLink({
+      conversation_id: conversationId,
+      my_agent_id: myAgent,
+      their_agent_id: theirAgent,
+      initiating_user_id: user.id,
+    });
+  } catch (err) {
+    redirect(
+      `/app/c/${conversationId}?error=${encodeURIComponent(
+        err instanceof Error ? err.message : "Link request failed.",
+      )}`,
+    );
+  }
+  revalidatePath(`/app/c/${conversationId}`);
+  redirect(`/app/c/${conversationId}`);
+}
+
+async function respondLinkAction(formData: FormData) {
+  "use server";
+  const user = await requireUser();
+  const conversationId = String(formData.get("conversation_id") ?? "");
+  const linkId = String(formData.get("link_id") ?? "");
+  const decision = String(formData.get("decision") ?? "") as
+    | "accept"
+    | "decline";
+  requireUserMember(conversationId, user.id);
+  try {
+    respondAgentLink({
+      link_id: linkId,
+      responding_user_id: user.id,
+      decision,
+    });
+  } catch (err) {
+    redirect(
+      `/app/c/${conversationId}?error=${encodeURIComponent(
+        err instanceof Error ? err.message : "Respond failed.",
+      )}`,
+    );
+  }
+  revalidatePath(`/app/c/${conversationId}`);
+  redirect(`/app/c/${conversationId}`);
+}
+
+async function revokeLinkAction(formData: FormData) {
+  "use server";
+  const user = await requireUser();
+  const conversationId = String(formData.get("conversation_id") ?? "");
+  const linkId = String(formData.get("link_id") ?? "");
+  requireUserMember(conversationId, user.id);
+  try {
+    revokeAgentLink({ link_id: linkId, user_id: user.id });
+  } catch (err) {
+    redirect(
+      `/app/c/${conversationId}?error=${encodeURIComponent(
+        err instanceof Error ? err.message : "Revoke failed.",
+      )}`,
+    );
+  }
+  revalidatePath(`/app/c/${conversationId}`);
+  redirect(`/app/c/${conversationId}`);
+}
+
 async function removeMemberAction(formData: FormData) {
   "use server";
   const user = await requireUser();
@@ -409,6 +517,23 @@ export default async function ConversationPage({
     if (v) personaOverrides[a.id] = v;
   }
 
+  // v0.14: my agents NOT yet in this group (any group member can self-add).
+  const memberIdSet = new Set(memberAgents.map((a) => a.id));
+  const myAgentsForSelfAdd =
+    conv.type === "group"
+      ? listAgentsForUser(user.id).filter((a) => !memberIdSet.has(a.id))
+      : [];
+
+  // v0.14: all agent_links for this conversation (UI renders status badges).
+  const agentLinks =
+    conv.type === "group" ? listLinksForConversation(id) : [];
+
+  // Workspace & task counts so the chat header's pills can show numbers.
+  const workspaces = listWorkspacesForConversation(id);
+  const openTaskCount = listTasksForConversation(id).filter(
+    (t) => t.status !== "done" && t.status !== "cancelled",
+  ).length;
+
   return (
     <ConversationView
       conv={conv}
@@ -416,10 +541,16 @@ export default async function ConversationPage({
       messages={messages}
       reactionsByMessageId={reactionsByMessageId}
       myAgentId={myAgentId}
+      myUserId={user.id}
       state={state}
       typingAgentIds={typing}
       recentFailures={recentFailures}
       inviteCandidates={inviteCandidates}
+      myAgentsForSelfAdd={myAgentsForSelfAdd}
+      agentLinks={agentLinks}
+      workspaceCount={workspaces.length}
+      primaryWorkspaceId={workspaces[0]?.id ?? null}
+      openTaskCount={openTaskCount}
       forwardTargets={forwardTargets}
       myManagedAgentsInRoom={myManagedAgentsInRoom}
       personaOverrides={personaOverrides}
@@ -433,6 +564,10 @@ export default async function ConversationPage({
         archive: toggleArchiveAction,
         rename: renameGroupAction,
         addMember: addMemberAction,
+        addOwnAgent: addOwnAgentAction,
+        requestLink: requestLinkAction,
+        respondLink: respondLinkAction,
+        revokeLink: revokeLinkAction,
         removeMember: removeMemberAction,
         leave: leaveGroupAction,
         forward: forwardAction,

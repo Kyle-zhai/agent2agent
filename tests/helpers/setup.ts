@@ -21,6 +21,7 @@ export function teardownTestDb(): void {
 
 export function resetTables(db: { prepare: (sql: string) => { run: () => void } }): void {
   const tables = [
+    "agent_links",
     "tool_call_requests",
     "invite_redemptions",
     "invite_links",

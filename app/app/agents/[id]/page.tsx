@@ -330,7 +330,7 @@ export default async function AgentDetailPage({
       <section className="mt-10">
         <h2 className="text-lg font-semibold">Avatar</h2>
         <div className="mt-3 surface p-5">
-          <form action={uploadAvatarAction} encType="multipart/form-data" className="flex items-center gap-3 flex-wrap">
+          <form action={uploadAvatarAction} className="flex items-center gap-3 flex-wrap">
             <input type="hidden" name="agent_id" value={agent.id} />
             <input
               type="file"

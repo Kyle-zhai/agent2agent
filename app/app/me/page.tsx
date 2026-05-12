@@ -128,7 +128,7 @@ export default async function ProfilePage({
           </div>
         )}
         <div className="flex-1">
-          <form action={uploadAvatarAction} encType="multipart/form-data" className="flex items-center gap-2">
+          <form action={uploadAvatarAction} className="flex items-center gap-2">
             <input
               type="file"
               name="avatar"

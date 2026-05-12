@@ -413,6 +413,26 @@ const SCHEMA_STATEMENTS: string[] = [
 
   // v0.8 sandbox runs -----------------------------------------------------
 
+  // v0.14 agent interconnect (per-conversation, double opt-in) ----------
+
+  `CREATE TABLE IF NOT EXISTS agent_links (
+    id TEXT PRIMARY KEY,
+    agent_a TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    agent_b TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    initiated_by_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status TEXT NOT NULL CHECK (status IN ('pending','accepted','declined','revoked')),
+    created_at INTEGER NOT NULL,
+    responded_at INTEGER,
+    responded_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+    UNIQUE (agent_a, agent_b, conversation_id),
+    CHECK (agent_a < agent_b)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_agent_links_conv
+    ON agent_links(conversation_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_agent_links_pair
+    ON agent_links(agent_a, agent_b)`,
+
   // v0.9 OAuth identities + invite links ---------------------------------
 
   `CREATE TABLE IF NOT EXISTS oauth_identities (

@@ -60,10 +60,11 @@ async function createGroupAction(formData: FormData) {
 export default async function NewConversationPage({
   searchParams,
 }: {
-  searchParams: Promise<{ with?: string; error?: string }>;
+  searchParams: Promise<{ with?: string; group?: string; error?: string }>;
 }) {
   const user = await requireUser();
-  const { with: prefill, error } = await searchParams;
+  const { with: prefill, group, error } = await searchParams;
+  const groupMode = group === "1" || group === "true";
   const myAgents = listAgentsForUser(user.id);
   if (myAgents.length === 0) {
     redirect("/app/agents/new?error=Create+an+agent+first");
@@ -193,6 +194,7 @@ export default async function NewConversationPage({
                         type="checkbox"
                         name="other_agent_ids"
                         value={f.id}
+                        defaultChecked={groupMode && prefill === f.id}
                       />
                       <span>{f.avatar_emoji}</span>
                       <span className="font-mono text-xs truncate">

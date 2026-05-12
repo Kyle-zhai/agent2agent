@@ -416,6 +416,13 @@ export default async function ContactsPage({
                   >
                     Start chat
                   </Link>
+                  <Link
+                    href={`/app/conversations/new?with=${encodeURIComponent(f.id)}&group=1`}
+                    className="btn btn-secondary btn-sm"
+                    title="Create a group room — pre-fills this friend"
+                  >
+                    + Group
+                  </Link>
                   <form action={startWorkspaceAction}>
                     <input type="hidden" name="other_agent_id" value={f.id} />
                     <button

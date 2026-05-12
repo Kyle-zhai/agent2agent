@@ -27,10 +27,26 @@ type ChatActions = {
   archive: (formData: FormData) => Promise<void>;
   rename: (formData: FormData) => Promise<void>;
   addMember: (formData: FormData) => Promise<void>;
+  addOwnAgent: (formData: FormData) => Promise<void>;
+  requestLink: (formData: FormData) => Promise<void>;
+  respondLink: (formData: FormData) => Promise<void>;
+  revokeLink: (formData: FormData) => Promise<void>;
   removeMember: (formData: FormData) => Promise<void>;
   leave: (formData: FormData) => Promise<void>;
   forward: (formData: FormData) => Promise<void>;
   setPersonaOverride: (formData: FormData) => Promise<void>;
+};
+
+export type AgentLinkRow = {
+  id: string;
+  agent_a: string;
+  agent_b: string;
+  conversation_id: string;
+  initiated_by_user_id: string;
+  status: "pending" | "accepted" | "declined" | "revoked";
+  created_at: number;
+  responded_at: number | null;
+  responded_by_user_id: string | null;
 };
 
 type ForwardTarget = { id: string; label: string };
@@ -41,10 +57,16 @@ export function ConversationView({
   messages,
   reactionsByMessageId,
   myAgentId,
+  myUserId,
   state,
   typingAgentIds,
   recentFailures,
   inviteCandidates,
+  myAgentsForSelfAdd,
+  agentLinks,
+  workspaceCount,
+  primaryWorkspaceId,
+  openTaskCount,
   forwardTargets,
   myManagedAgentsInRoom,
   personaOverrides,
@@ -56,6 +78,7 @@ export function ConversationView({
   messages: MessageWithRelations[];
   reactionsByMessageId: Record<string, ReactionAggregate[]>;
   myAgentId: string;
+  myUserId: string;
   state: ConversationState;
   typingAgentIds: string[];
   recentFailures: Array<{
@@ -66,6 +89,11 @@ export function ConversationView({
     finished_at: number | null;
   }>;
   inviteCandidates: Agent[];
+  myAgentsForSelfAdd: Agent[];
+  agentLinks: AgentLinkRow[];
+  workspaceCount: number;
+  primaryWorkspaceId: string | null;
+  openTaskCount: number;
   forwardTargets: ForwardTarget[];
   myManagedAgentsInRoom: Agent[];
   personaOverrides: Record<string, string>;
@@ -201,18 +229,28 @@ export function ConversationView({
         </div>
         <div className="flex items-center gap-2">
           <Link
-            href={`/app/c/${conv.id}/workspace`}
-            className="hidden md:inline-flex tag hover:bg-[color:var(--color-tint-violet)]"
-            title="Shared workspaces in this conversation"
+            href={
+              primaryWorkspaceId
+                ? `/app/c/${conv.id}/workspace/${primaryWorkspaceId}`
+                : `/app/c/${conv.id}/workspace`
+            }
+            className="inline-flex tag hover:bg-[color:var(--color-tint-violet)]"
+            title={
+              workspaceCount === 0
+                ? "Create a shared file area for this room"
+                : workspaceCount === 1
+                ? "Open the shared file area"
+                : `${workspaceCount} shared workspaces — pick one`
+            }
           >
-            📁 Workspace
+            📁 Files{workspaceCount > 0 ? ` (${workspaceCount})` : ""}
           </Link>
           <Link
             href={`/app/c/${conv.id}/tasks`}
-            className="hidden md:inline-flex tag hover:bg-[color:var(--color-tint-violet)]"
+            className="inline-flex tag hover:bg-[color:var(--color-tint-violet)]"
             title="Tasks in this conversation"
           >
-            ✅ Tasks
+            ✅ Tasks{openTaskCount > 0 ? ` (${openTaskCount})` : ""}
           </Link>
           {state.pinned_at ? (
             <span className="tag tag-amber" title="Pinned to top of sidebar">📌 pinned</span>
@@ -340,7 +378,14 @@ export function ConversationView({
           members={members}
           ownerId={conv.created_by_agent_id}
           inviteCandidates={inviteCandidates}
+          myAgentsForSelfAdd={myAgentsForSelfAdd}
+          myUserId={myUserId}
+          agentLinks={agentLinks}
           addAction={actions.addMember}
+          addOwnAgentAction={actions.addOwnAgent}
+          requestLinkAction={actions.requestLink}
+          respondLinkAction={actions.respondLink}
+          revokeLinkAction={actions.revokeLink}
           removeAction={actions.removeMember}
           onClose={() => setShowMembers(false)}
         />
@@ -503,7 +548,14 @@ function MemberManagerBar({
   members,
   ownerId,
   inviteCandidates,
+  myAgentsForSelfAdd,
+  myUserId,
+  agentLinks,
   addAction,
+  addOwnAgentAction,
+  requestLinkAction,
+  respondLinkAction,
+  revokeLinkAction,
   removeAction,
   onClose,
 }: {
@@ -511,10 +563,26 @@ function MemberManagerBar({
   members: Agent[];
   ownerId: string;
   inviteCandidates: Agent[];
+  myAgentsForSelfAdd: Agent[];
+  myUserId: string;
+  agentLinks: AgentLinkRow[];
   addAction: (fd: FormData) => Promise<void>;
+  addOwnAgentAction: (fd: FormData) => Promise<void>;
+  requestLinkAction: (fd: FormData) => Promise<void>;
+  respondLinkAction: (fd: FormData) => Promise<void>;
+  revokeLinkAction: (fd: FormData) => Promise<void>;
   removeAction: (fd: FormData) => Promise<void>;
   onClose: () => void;
 }) {
+  // Partition members into mine vs theirs for the interconnect grid.
+  const myMembers = members.filter((m) => m.owner_user_id === myUserId);
+  const theirMembers = members.filter((m) => m.owner_user_id !== myUserId);
+  const linkBetween = (a: string, b: string): AgentLinkRow | null => {
+    const [x, y] = a < b ? [a, b] : [b, a];
+    return (
+      agentLinks.find((l) => l.agent_a === x && l.agent_b === y) ?? null
+    );
+  };
   return (
     <div className="bg-[color:var(--color-tint-violet)]/40 border-b border-[color:var(--color-line)] px-5 py-3">
       <div className="max-w-3xl mx-auto">
@@ -550,8 +618,33 @@ function MemberManagerBar({
             </li>
           ))}
         </ul>
+
+        {/* v0.14: any member can add their own agents into the group */}
+        {myAgentsForSelfAdd.length > 0 ? (
+          <form
+            action={addOwnAgentAction}
+            className="flex items-center gap-2 mb-2"
+          >
+            <input type="hidden" name="conversation_id" value={convId} />
+            <select
+              name="agent_id"
+              className="input !py-1.5 !text-xs flex-1 font-mono"
+            >
+              {myAgentsForSelfAdd.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.avatar_emoji} {a.id} (mine)
+                </option>
+              ))}
+            </select>
+            <button type="submit" className="btn btn-secondary btn-sm">
+              Pull my agent in
+            </button>
+          </form>
+        ) : null}
+
+        {/* Owner-only: invite a friend's agent */}
         {inviteCandidates.length > 0 ? (
-          <form action={addAction} className="flex items-center gap-2">
+          <form action={addAction} className="flex items-center gap-2 mb-3">
             <input type="hidden" name="conversation_id" value={convId} />
             <select name="agent_id" className="input !py-1.5 !text-xs flex-1 font-mono">
               {inviteCandidates.map((a) => (
@@ -561,14 +654,110 @@ function MemberManagerBar({
               ))}
             </select>
             <button type="submit" className="btn btn-primary btn-sm">
-              Add to group
+              Invite a friend's agent
             </button>
           </form>
-        ) : (
-          <div className="text-xs text-[color:var(--color-ink-muted)]">
-            All your friend agents are already in this group.
+        ) : null}
+
+        {/* v0.14: agent interconnect matrix — only meaningful in groups with
+            cross-user members. The interconnect is a social trust signal:
+            both sides explicitly opt-in their agents to collab autonomously. */}
+        {myMembers.length > 0 && theirMembers.length > 0 ? (
+          <div className="mt-2 border-t border-[color:var(--color-line)] pt-2">
+            <div className="text-[11px] uppercase tracking-wider text-[color:var(--color-ink-soft)] mb-1.5">
+              🔗 Agent interconnect
+            </div>
+            <table className="w-full text-[11px]">
+              <tbody>
+                {myMembers.map((mine) =>
+                  theirMembers.map((theirs) => {
+                    const link = linkBetween(mine.id, theirs.id);
+                    const youInitiated =
+                      link?.initiated_by_user_id === myUserId;
+                    return (
+                      <tr key={mine.id + theirs.id}>
+                        <td className="py-1 pr-2 font-mono truncate">
+                          {mine.avatar_emoji} {mine.id}
+                        </td>
+                        <td className="py-1 px-1 text-[color:var(--color-ink-soft)]">↔</td>
+                        <td className="py-1 pr-2 font-mono truncate">
+                          {theirs.avatar_emoji} {theirs.id}
+                        </td>
+                        <td className="py-1 text-right">
+                          {link?.status === "accepted" ? (
+                            <form action={revokeLinkAction} className="contents">
+                              <input type="hidden" name="conversation_id" value={convId} />
+                              <input type="hidden" name="link_id" value={link.id} />
+                              <span className="tag tag-green mr-1">🔗 linked</span>
+                              <button
+                                type="submit"
+                                className="btn btn-ghost btn-sm"
+                                title="Revoke interconnect"
+                              >
+                                ✕
+                              </button>
+                            </form>
+                          ) : link?.status === "pending" ? (
+                            youInitiated ? (
+                              <span className="tag tag-amber">awaiting them</span>
+                            ) : (
+                              <form
+                                action={respondLinkAction}
+                                className="inline-flex gap-1"
+                              >
+                                <input type="hidden" name="conversation_id" value={convId} />
+                                <input type="hidden" name="link_id" value={link.id} />
+                                <button
+                                  type="submit"
+                                  name="decision"
+                                  value="accept"
+                                  className="btn btn-primary btn-sm"
+                                >
+                                  Accept
+                                </button>
+                                <button
+                                  type="submit"
+                                  name="decision"
+                                  value="decline"
+                                  className="btn btn-ghost btn-sm"
+                                >
+                                  Decline
+                                </button>
+                              </form>
+                            )
+                          ) : (
+                            <form action={requestLinkAction} className="contents">
+                              <input type="hidden" name="conversation_id" value={convId} />
+                              <input type="hidden" name="my_agent_id" value={mine.id} />
+                              <input type="hidden" name="their_agent_id" value={theirs.id} />
+                              <button
+                                type="submit"
+                                className="btn btn-secondary btn-sm"
+                              >
+                                Request interconnect
+                              </button>
+                            </form>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  }),
+                )}
+              </tbody>
+            </table>
+            <p className="text-[10px] text-[color:var(--color-ink-soft)] mt-1.5">
+              Interconnect is a mutual opt-in. Both owners must accept before
+              their agents are marked as collaborating. Friendship between
+              agents stays the prerequisite either way.
+            </p>
           </div>
-        )}
+        ) : null}
+
+        {inviteCandidates.length === 0 && myAgentsForSelfAdd.length === 0 ? (
+          <div className="text-xs text-[color:var(--color-ink-muted)]">
+            Everyone you could add is already in this group.
+          </div>
+        ) : null}
       </div>
     </div>
   );
