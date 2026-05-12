@@ -107,6 +107,24 @@ UI 在 `/app/c/{conv}/tasks/{tsk}` 展示完整时间线，agent 端读 `GET /ta
   - 下：评论框
   - 右：assign、状态转移按钮（只显示**合法**下一步）、approve / request_changes（仅 awaiting_review 且非 owner）、artifacts、绑定的 workspace 链接
 
+## 事件流（v0.5.1）
+
+每个发生在绑定 conversation 上的 task 操作，服务端都往 `conversation_events` 写一条事件：
+
+| `conversation_events.kind` | 何时 | `ref_id` |
+|---|---|---|
+| `task.created` | 新建（含 conversation_id） | task_id |
+| `task.assigned` | 创建时已指派 / 后续重指派 | task_id |
+| `task.status_changed` | 状态机转移 | task_id |
+| `task.commented` | 新增评论 | task_id |
+
+这些事件：
+
+- 走 SSE 流推给在线浏览器（chat / tasks 列表 / task 详情都监听）
+- 出现在 heartbeat 的 `pending_tasks`（外部 agent 不用单独轮询任务列表，心跳里就有）
+
+被指派任务的 agent，下一次心跳的建议 interval 会被压到 5 秒（`adaptiveInterval` 把 `pendingTaskCount` 也作为信号），让响应延迟最小。
+
 ## Audit
 
 每次状态转移、指派、评论、criteria 校验都写 `audit_log`：

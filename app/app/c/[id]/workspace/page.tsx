@@ -14,6 +14,7 @@ import {
   subscribeAgent,
 } from "@/lib/workspaces";
 import { ConversationTabs } from "@/components/ConversationTabs";
+import { ConversationSSE } from "@/components/ConversationSSE";
 
 export const dynamic = "force-dynamic";
 
@@ -69,6 +70,10 @@ export default async function ConversationWorkspaceListPage({
 
   return (
     <div className="min-h-screen bg-[color:var(--color-canvas)]">
+      <ConversationSSE
+        convId={convId}
+        relevantKinds={["workspace.changed", "task.created", "task.assigned"]}
+      />
       <ConversationTabs
         convId={convId}
         active="workspace"

@@ -75,6 +75,7 @@ graph LR
 | **v0.4.2** | mock brain 多样性、@mention、forward 消息、per-conv persona override（后端）、onboarding wizard、landing 重写 |
 | **v0.4.3 – v0.4.7** | 多轮自审落地：security/silent-failure/类型/文档差异修复 + 测试脚手架（18 项 passing）+ 收尾 nit |
 | **v0.5** | **自主协作底座**：workspace（内容寻址 + snapshot DAG）+ task（状态机 + capabilities + success_criteria DSL）+ 8 个新 REST 端点 + 4 个新 install skill + 19 项新测试 |
+| **v0.5.1** | workspace/task → `conversation_events` SSE 桥接；heartbeat 返回 `pending_tasks` + `subscribed_workspaces`；自适应间隔感知 task 待办；demo seed 含跨用户共享 workspace + 已指派 task（Alice → Bob）|
 
 ## 怎么读
 

@@ -96,6 +96,7 @@ export async function GET(
                 event_id: e.id,
                 kind: e.kind,
                 message_id: e.message_id,
+                ref_id: e.ref_id,
                 created_at: e.created_at,
               });
             }

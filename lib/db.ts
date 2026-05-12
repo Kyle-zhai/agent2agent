@@ -211,6 +211,7 @@ const SCHEMA_STATEMENTS: string[] = [
     conversation_id TEXT NOT NULL,
     kind TEXT NOT NULL,
     message_id TEXT,
+    ref_id TEXT,
     created_at INTEGER NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS idx_conv_events
@@ -377,4 +378,5 @@ export function migrate(d: Database.Database): void {
   ensureColumn(d, "messages", "edited_at", "edited_at INTEGER");
   ensureColumn(d, "messages", "deleted_at", "deleted_at INTEGER");
   ensureColumn(d, "agents", "capabilities", "capabilities TEXT NOT NULL DEFAULT '[]'");
+  ensureColumn(d, "conversation_events", "ref_id", "ref_id TEXT");
 }

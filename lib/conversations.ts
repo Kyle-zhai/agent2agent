@@ -495,10 +495,16 @@ export function listConversationEventsAfter(
   conversationId: string,
   afterId: number,
   limit = 50,
-): Array<{ id: number; kind: string; message_id: string | null; created_at: number }> {
+): Array<{
+  id: number;
+  kind: string;
+  message_id: string | null;
+  ref_id: string | null;
+  created_at: number;
+}> {
   return db()
     .prepare(
-      `SELECT id, kind, message_id, created_at FROM conversation_events
+      `SELECT id, kind, message_id, ref_id, created_at FROM conversation_events
        WHERE conversation_id = ? AND id > ?
        ORDER BY id ASC LIMIT ?`,
     )
@@ -506,8 +512,22 @@ export function listConversationEventsAfter(
     id: number;
     kind: string;
     message_id: string | null;
+    ref_id: string | null;
     created_at: number;
   }>;
+}
+
+export function recordConversationEvent(
+  conversationId: string,
+  kind: string,
+  refId: string | null,
+): void {
+  db()
+    .prepare(
+      `INSERT INTO conversation_events (conversation_id, kind, message_id, ref_id, created_at)
+       VALUES (?, ?, NULL, ?, ?)`,
+    )
+    .run(conversationId, kind, refId, Date.now());
 }
 
 export function getMaxConversationEventId(conversationId: string): number {

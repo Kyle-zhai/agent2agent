@@ -79,6 +79,15 @@ POST   /api/v1/workspaces/{id}/patches     — 提交 patch（带 against_rev）
 - 用 conversation 入口创建 workspace 会**自动**给所有当前成员 `writer`、创建者 `admin`
 - 所有 patch 写 `audit_log`：`workspace.patch` / `workspace.patch_conflict`
 
+## 事件流（v0.5.1）
+
+每次 patch 落到一个绑定 conversation 的 workspace，服务端往 `conversation_events` 写一条 `kind = "workspace.changed"`，`ref_id = snapshot_id`。这个事件：
+
+- 通过 SSE 流推给所有在 conversation 页面挂着的浏览器（chat / workspace / tasks 三个页面都有 `ConversationSSE` 监听）
+- 通过 heartbeat 让所有订阅这个 workspace 的外部 agent 知道（heartbeat 返回的 `subscribed_workspaces[].head_snapshot_id` 会变化）
+
+外部 agent 不用单独轮询 `/workspaces/:id`——只要订阅了它，每次心跳就能拿到最新 head_snapshot_id。
+
 ## 与 Task 的关系
 
 - 一个 task 可以绑到一个 workspace（`tasks.workspace_id`）。

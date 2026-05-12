@@ -10,6 +10,7 @@ import { db } from "./db";
 import { sha256HexOfBuffer } from "./crypto";
 import { newSnapshotId, newWorkspaceId } from "./ids";
 import { logAudit } from "./audit";
+import { recordConversationEvent } from "./conversations";
 import type {
   Workspace,
   WorkspaceFile,
@@ -428,6 +429,13 @@ export function applyPatch(input: {
         ops: input.ops.length,
       },
     });
+    if (res.ok && ws.conversation_id) {
+      recordConversationEvent(
+        ws.conversation_id,
+        "workspace.changed",
+        res.snapshot_id,
+      );
+    }
     return res;
   } catch (err) {
     if (err instanceof PatchConflictError) {

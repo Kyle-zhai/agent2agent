@@ -2,6 +2,7 @@ import "server-only";
 import { db } from "./db";
 import { newTaskId } from "./ids";
 import { logAudit } from "./audit";
+import { recordConversationEvent } from "./conversations";
 import {
   agentCapabilityNames,
   getAgent,
@@ -259,6 +260,12 @@ export function createTask(input: CreateTaskInput): Task {
       detail: { task_id: id, to: assignedTo },
     });
   }
+  if (input.conversation_id) {
+    recordConversationEvent(input.conversation_id, "task.created", id);
+    if (assignedTo) {
+      recordConversationEvent(input.conversation_id, "task.assigned", id);
+    }
+  }
   return getTask(id)!;
 }
 
@@ -348,6 +355,9 @@ export function addTaskComment(
     agentId: actorAgentId,
     detail: { task_id: taskId, len: trimmed.length },
   });
+  if (t.conversation_id) {
+    recordConversationEvent(t.conversation_id, "task.commented", taskId);
+  }
   return appendEvent(taskId, actorAgentId, "comment", { body: trimmed });
 }
 
@@ -451,6 +461,9 @@ export function assignTask(input: AssignInput): Task {
     agentId: input.actor_agent_id,
     detail: { task_id: t.id, to: assignee.id },
   });
+  if (t.conversation_id) {
+    recordConversationEvent(t.conversation_id, "task.assigned", t.id);
+  }
   return getTask(t.id)!;
 }
 
@@ -534,6 +547,9 @@ export function transitionTaskStatus(input: TransitionInput): {
     agentId: input.actor_agent_id,
     detail: { task_id: t.id, from: t.status, to: finalStatus },
   });
+  if (t.conversation_id) {
+    recordConversationEvent(t.conversation_id, "task.status_changed", t.id);
+  }
   return { task: getTask(t.id)!, criteria_failures: criteriaFailures };
 }
 

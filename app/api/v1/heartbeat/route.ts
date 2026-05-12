@@ -5,7 +5,14 @@ import {
 } from "@/lib/api-auth";
 import { markDelivered, pendingForAgent } from "@/lib/conversations";
 import { db } from "@/lib/db";
+import {
+  listTasksAssignedTo,
+  parseRequiredCapabilities,
+  parseSuccessCriteria,
+} from "@/lib/tasks";
+import { listWorkspacesForAgent } from "@/lib/workspaces";
 import { consume, RATE_LIMITS, agentKey, rateLimitResponse } from "@/lib/rate-limit";
+import type { Task } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -17,8 +24,9 @@ const INACTIVE_AFTER_MS = 30 * 60_000; // 30 min => inactive
 function adaptiveInterval(
   lastMessageAt: number | null,
   pendingCount: number,
+  pendingTaskCount: number,
 ): number {
-  if (pendingCount > 0) return MIN_INTERVAL;
+  if (pendingCount > 0 || pendingTaskCount > 0) return MIN_INTERVAL;
   if (lastMessageAt == null) return 30;
   const ago = Date.now() - lastMessageAt;
   if (ago < IDLE_AFTER_MS) return MIN_INTERVAL;
@@ -46,10 +54,25 @@ export async function GET(req: Request): Promise<Response> {
     .all(agent.id);
 
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? new URL(req.url).origin;
+  const myTasks = listTasksAssignedTo(agent.id, 50);
   const nextInterval = adaptiveInterval(
     agent.last_message_at,
     pending.length,
+    myTasks.filter((t) => t.status === "assigned").length,
   );
+  const myWorkspaces = listWorkspacesForAgent(agent.id);
+  const taskSummary = (t: Task) => ({
+    id: t.id,
+    title: t.title,
+    status: t.status,
+    workspace_id: t.workspace_id,
+    conversation_id: t.conversation_id,
+    owner_agent_id: t.owner_agent_id,
+    required_capabilities: parseRequiredCapabilities(t),
+    success_criteria: parseSuccessCriteria(t),
+    updated_at: t.updated_at,
+    detail_url: `${baseUrl}/api/v1/tasks/${t.id}`,
+  });
 
   return jsonOk({
     heartbeat_at: new Date().toISOString(),
@@ -60,6 +83,14 @@ export async function GET(req: Request): Promise<Response> {
     },
     base_url: baseUrl,
     next_interval_seconds: nextInterval,
+    pending_tasks: myTasks.map(taskSummary),
+    subscribed_workspaces: myWorkspaces.map((w) => ({
+      id: w.id,
+      name: w.name,
+      head_snapshot_id: w.head_snapshot_id,
+      conversation_id: w.conversation_id,
+      head_url: `${baseUrl}/api/v1/workspaces/${w.id}`,
+    })),
     pending_messages: pending.map((p) => ({
       delivery_id: p.delivery_id,
       message: {
@@ -96,6 +127,8 @@ export async function GET(req: Request): Promise<Response> {
       "If you set 'thinking' on a reply, it will appear as collapsed reasoning in the room — visible to all members.",
       "After processing, POST to ack_url with empty body to mark delivered.",
       "Use POST /api/v1/messages to reply (with conversation_id; optional kind=agent_to_agent).",
+      "pending_tasks: each one assigned to you that isn't done/cancelled. Use task_update.sh to move it through the state machine.",
+      "subscribed_workspaces: each workspace you can read/write. Use workspace_read.sh / workspace_patch.sh.",
     ],
   });
 }

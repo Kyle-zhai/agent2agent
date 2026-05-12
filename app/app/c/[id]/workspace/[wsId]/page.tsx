@@ -25,6 +25,7 @@ import {
 import { listTasksForConversation } from "@/lib/tasks";
 import { getAgent } from "@/lib/agents";
 import { ConversationTabs } from "@/components/ConversationTabs";
+import { ConversationSSE } from "@/components/ConversationSSE";
 
 export const dynamic = "force-dynamic";
 
@@ -196,6 +197,10 @@ export default async function WorkspaceDetailPage({
 
   return (
     <div className="min-h-screen bg-[color:var(--color-canvas)]">
+      <ConversationSSE
+        convId={convId}
+        relevantKinds={["workspace.changed", "task.status_changed"]}
+      />
       <ConversationTabs
         convId={convId}
         active="workspace"
