@@ -17,7 +17,6 @@ import {
   listSnapshotsForWorkspace,
   listSubscribers,
   listWorkspacesForConversation,
-  readFileAt,
   shortenSha,
   subscribeAgent,
   unsubscribeAgent,
@@ -31,53 +30,9 @@ import { ConversationSSE } from "@/components/ConversationSSE";
 
 export const dynamic = "force-dynamic";
 
-const PREVIEW_BYTE_CAP = 200 * 1024;
-
 // ──────────────────────────────────────────────────────────────────────────
 // Server actions
 // ──────────────────────────────────────────────────────────────────────────
-
-async function modifyFileAction(formData: FormData) {
-  "use server";
-  const user = await requireUser();
-  const convId = String(formData.get("conversation_id") ?? "");
-  const wsId = String(formData.get("workspace_id") ?? "");
-  const againstRev = String(formData.get("against_rev") ?? "");
-  const path = String(formData.get("path") ?? "");
-  const content = String(formData.get("content") ?? "");
-  const commit = String(formData.get("commit_message") ?? "").trim() || "edit";
-  const { myAgentId } = requireUserMember(convId, user.id);
-  const ws = getWorkspace(wsId);
-  if (!ws) notFound();
-  try {
-    const result = applyPatch({
-      workspace_id: ws.id,
-      agent_id: myAgentId,
-      against_rev: againstRev,
-      ops: [{ path, op: "modify", content }],
-      commit_message: commit,
-    });
-    if (!result.ok) {
-      // Route to the resolve page with the user's content preserved.
-      const u = new URLSearchParams({
-        path,
-        my_content: content,
-        against_rev: againstRev,
-      });
-      redirect(`/app/c/${convId}/workspace/${wsId}/resolve?${u}`);
-    }
-  } catch (err) {
-    redirect(
-      `/app/c/${convId}/workspace/${wsId}?error=${encodeURIComponent(
-        err instanceof Error ? err.message : "Edit failed.",
-      )}`,
-    );
-  }
-  revalidatePath(`/app/c/${convId}/workspace/${wsId}`);
-  redirect(
-    `/app/c/${convId}/workspace/${wsId}?open=${encodeURIComponent(path)}`,
-  );
-}
 
 async function uploadFilesAction(formData: FormData) {
   "use server";
@@ -121,7 +76,7 @@ async function uploadFilesAction(formData: FormData) {
     if (!r.ok) {
       redirect(
         `/app/c/${convId}/workspace/${wsId}?error=${encodeURIComponent(
-          `conflict — refresh and try again`,
+          "conflict — refresh and try again",
         )}`,
       );
     }
@@ -134,40 +89,6 @@ async function uploadFilesAction(formData: FormData) {
   }
   revalidatePath(`/app/c/${convId}/workspace/${wsId}`);
   redirect(`/app/c/${convId}/workspace/${wsId}`);
-}
-
-async function createInlineFileAction(formData: FormData) {
-  "use server";
-  const user = await requireUser();
-  const convId = String(formData.get("conversation_id") ?? "");
-  const wsId = String(formData.get("workspace_id") ?? "");
-  const path = String(formData.get("path") ?? "").trim();
-  const content = String(formData.get("content") ?? "");
-  const { myAgentId } = requireUserMember(convId, user.id);
-  const ws = getWorkspace(wsId);
-  if (!ws) notFound();
-  if (!path) {
-    redirect(`/app/c/${convId}/workspace/${wsId}?error=path+required`);
-  }
-  try {
-    applyPatch({
-      workspace_id: ws.id,
-      agent_id: myAgentId,
-      against_rev: ws.head_snapshot_id!,
-      ops: [{ path, op: "create", content }],
-      commit_message: `add ${path}`,
-    });
-  } catch (err) {
-    redirect(
-      `/app/c/${convId}/workspace/${wsId}?error=${encodeURIComponent(
-        err instanceof Error ? err.message : "Add failed.",
-      )}`,
-    );
-  }
-  revalidatePath(`/app/c/${convId}/workspace/${wsId}`);
-  redirect(
-    `/app/c/${convId}/workspace/${wsId}?open=${encodeURIComponent(path)}`,
-  );
 }
 
 async function deleteFileAction(formData: FormData) {
@@ -222,25 +143,76 @@ async function setRoleAction(formData: FormData) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// Helpers
+// Tree helpers
 // ──────────────────────────────────────────────────────────────────────────
 
-function fileIcon(path: string): string {
-  const ext = path.split(".").pop()?.toLowerCase() ?? "";
-  if (
-    ext === "png" ||
-    ext === "jpg" ||
-    ext === "jpeg" ||
-    ext === "gif" ||
-    ext === "webp"
-  )
-    return "🖼";
+type FileMeta = {
+  path: string;
+  content_sha256: string;
+  size_bytes: number;
+};
+
+type TreeNode = {
+  name: string;
+  fullPath: string;
+  file?: FileMeta;
+  children?: Map<string, TreeNode>;
+};
+
+function buildTree(files: FileMeta[]): TreeNode {
+  const root: TreeNode = {
+    name: "",
+    fullPath: "",
+    children: new Map(),
+  };
+  for (const f of files) {
+    const parts = f.path.split("/").filter((p) => p.length > 0);
+    let cur = root;
+    for (let i = 0; i < parts.length; i++) {
+      const isLeaf = i === parts.length - 1;
+      const name = parts[i];
+      if (!cur.children) cur.children = new Map();
+      let next = cur.children.get(name);
+      if (!next) {
+        next = {
+          name,
+          fullPath: parts.slice(0, i + 1).join("/"),
+          ...(isLeaf ? { file: f } : { children: new Map() }),
+        };
+        cur.children.set(name, next);
+      }
+      cur = next;
+    }
+  }
+  return root;
+}
+
+function sortedChildren(node: TreeNode): TreeNode[] {
+  if (!node.children) return [];
+  return [...node.children.values()].sort((a, b) => {
+    // Folders first, then files; alphabetical within each.
+    const aIsFolder = !a.file;
+    const bIsFolder = !b.file;
+    if (aIsFolder !== bIsFolder) return aIsFolder ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+}
+
+function countDescendants(node: TreeNode): number {
+  if (node.file) return 1;
+  let n = 0;
+  for (const c of node.children?.values() ?? []) n += countDescendants(c);
+  return n;
+}
+
+function fileIcon(name: string): string {
+  const ext = name.split(".").pop()?.toLowerCase() ?? "";
+  if (["png", "jpg", "jpeg", "gif", "webp"].includes(ext)) return "🖼";
   if (ext === "md") return "📝";
   if (ext === "json") return "⚙";
   if (ext === "sql") return "🗄";
-  if (ext === "sh" || ext === "bash") return "💻";
-  if (ext === "py" || ext === "ts" || ext === "tsx" || ext === "js")
-    return "🧩";
+  if (["sh", "bash"].includes(ext)) return "💻";
+  if (["py", "ts", "tsx", "js"].includes(ext)) return "🧩";
   if (ext === "pdf") return "📕";
   return "📄";
 }
@@ -249,15 +221,6 @@ function formatSize(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / 1024 / 1024).toFixed(2)} MB`;
-}
-
-function isLikelyText(buf: Buffer): boolean {
-  // Quick heuristic: any NUL byte in the first 8KB → binary.
-  const slice = buf.subarray(0, Math.min(buf.length, 8192));
-  for (let i = 0; i < slice.length; i++) {
-    if (slice[i] === 0) return false;
-  }
-  return true;
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -269,7 +232,7 @@ export default async function WorkspaceDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string; wsId: string }>;
-  searchParams: Promise<{ error?: string; open?: string; rev?: string }>;
+  searchParams: Promise<{ error?: string }>;
 }) {
   const user = await requireUser();
   const { id: convId, wsId } = await params;
@@ -291,7 +254,7 @@ export default async function WorkspaceDetailPage({
     .map((m) => getAgent(m.agent_id))
     .filter((a): a is NonNullable<ReturnType<typeof getAgent>> => !!a);
 
-  const openPath = sp.open ?? null;
+  const tree = buildTree(files);
 
   const workspaceCount = listWorkspacesForConversation(convId).length;
   const openTasks = listTasksForConversation(convId).filter(
@@ -310,10 +273,10 @@ export default async function WorkspaceDetailPage({
         workspaceCount={workspaceCount}
         openTaskCount={openTasks}
         title={ws.name}
-        subtitle={`${files.length} file${files.length === 1 ? "" : "s"} · head ${shortenSha(ws.head_snapshot_id ?? "")} · this room only`}
+        subtitle={`${files.length} file${files.length === 1 ? "" : "s"} · ${shortenSha(ws.head_snapshot_id ?? "")} · this room only`}
       />
-      <main className="max-w-6xl mx-auto p-6 grid grid-cols-1 md:grid-cols-[1fr_280px] gap-5">
-        {/* ─── LEFT: big files area ─────────────────────── */}
+      <main className="max-w-5xl mx-auto p-6 grid grid-cols-1 md:grid-cols-[1fr_240px] gap-5">
+        {/* ─── LEFT: Finder-style file area ─────────────── */}
         <section className="space-y-3">
           {sp.error ? (
             <div className="callout callout-amber text-[13px]">
@@ -321,180 +284,99 @@ export default async function WorkspaceDetailPage({
             </div>
           ) : null}
 
+          <FinderArea
+            root={tree}
+            convId={convId}
+            wsId={ws.id}
+            fileCount={files.length}
+          />
+
+          {/* Upload */}
+          <form
+            action={uploadFilesAction}
+            className="surface p-3 flex items-center gap-2 flex-wrap"
+          >
+            <input type="hidden" name="conversation_id" value={convId} />
+            <input type="hidden" name="workspace_id" value={ws.id} />
+            <input
+              type="file"
+              name="files"
+              multiple
+              className="text-[12px] flex-1 min-w-[180px]"
+            />
+            <input
+              name="prefix"
+              placeholder="folder/ (optional)"
+              className="input text-[12px] py-1 w-[160px]"
+            />
+            <button type="submit" className="btn btn-primary btn-sm">
+              Upload
+            </button>
+          </form>
+
           {head ? (
-            <div className="text-[12px] text-[color:var(--color-ink-soft)]">
-              Last commit:{" "}
-              <b className="text-[color:var(--color-ink)]">
-                {head.commit_message || "—"}
-              </b>
+            <div className="text-[11px] text-[color:var(--color-ink-soft)] px-1">
+              Last commit: <b>{head.commit_message || "—"}</b>{" "}
               {head.created_by_agent_id ? (
-                <> by <code className="font-mono">{head.created_by_agent_id}</code></>
+                <>by <code className="font-mono">{head.created_by_agent_id}</code></>
               ) : null}{" "}
-              · {new Date(head.created_at).toLocaleString()} ·{" "}
+              ·{" "}
               <Link
                 href={`/app/c/${convId}/workspace/${ws.id}/snap/${head.id}`}
                 className="underline"
               >
-                diff
+                view diff
               </Link>
+              {snaps.length > 1 ? (
+                <>
+                  {" · "}
+                  <details className="inline">
+                    <summary className="cursor-pointer inline">
+                      {snaps.length} snapshots
+                    </summary>
+                    <ul className="mt-1 ml-2 space-y-0.5">
+                      {snaps.map((s) => (
+                        <li key={s.id}>
+                          <Link
+                            href={`/app/c/${convId}/workspace/${ws.id}/snap/${s.id}`}
+                            className="font-mono underline"
+                          >
+                            {shortenSha(s.id)}
+                          </Link>{" "}
+                          {s.commit_message || "—"}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                </>
+              ) : null}
             </div>
           ) : null}
-
-          <div className="surface overflow-hidden">
-            <div className="px-4 py-2.5 border-b border-[color:var(--color-line)] flex items-center justify-between">
-              <div className="font-semibold text-[14px]">
-                📁 Files{" "}
-                <span className="text-[color:var(--color-ink-soft)] font-normal">
-                  ({files.length})
-                </span>
-              </div>
-              <div className="text-[11px] text-[color:var(--color-ink-soft)]">
-                live · refresh on agent changes
-              </div>
-            </div>
-
-            {files.length === 0 ? (
-              <div className="px-4 py-10 text-center text-[13px] text-[color:var(--color-ink-soft)]">
-                This workspace is empty. Upload files below or have one of your
-                agents call <code className="font-mono">workspace.write_file</code>.
-              </div>
-            ) : (
-              <ul className="divide-y divide-[color:var(--color-line)]">
-                {files.map((f) => {
-                  const expanded = openPath === f.path;
-                  const isImage = /\.(png|jpe?g|gif|webp)$/i.test(f.path);
-                  const isBinary = !isImage; // refined inside on read
-                  void isBinary;
-                  return (
-                    <li key={f.path} id={`f-${encodeURIComponent(f.path)}`}>
-                      <FileRow
-                        f={f}
-                        expanded={expanded}
-                        convId={convId}
-                        wsId={ws.id}
-                        headRev={ws.head_snapshot_id!}
-                      />
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
-
-          {/* ─── Bottom: upload + add by path ─────────────── */}
-          <div className="surface p-4 space-y-3">
-            <div className="text-[13px] font-medium">⬆ Upload local files</div>
-            <form action={uploadFilesAction} className="space-y-2">
-              <input type="hidden" name="conversation_id" value={convId} />
-              <input type="hidden" name="workspace_id" value={ws.id} />
-              <input
-                type="file"
-                name="files"
-                multiple
-                className="text-[12px] block"
-              />
-              <input
-                name="prefix"
-                placeholder="optional folder prefix, e.g. notes/"
-                className="input text-[12px] py-1"
-              />
-              <button type="submit" className="btn btn-primary btn-sm w-full">
-                Upload to workspace
-              </button>
-              <p className="text-[11px] text-[color:var(--color-ink-soft)]">
-                Single file ≤ {formatSize(MAX_FILE_BYTES)}. Agents see the new
-                file immediately and can re-organize it.
-              </p>
-            </form>
-
-            <details className="text-[12px] mt-1">
-              <summary className="cursor-pointer text-[color:var(--color-ink-soft)] select-none">
-                Or add a text file by path…
-              </summary>
-              <form
-                action={createInlineFileAction}
-                className="space-y-1.5 mt-2"
-              >
-                <input type="hidden" name="conversation_id" value={convId} />
-                <input type="hidden" name="workspace_id" value={ws.id} />
-                <input
-                  name="path"
-                  required
-                  placeholder="path/new.md"
-                  className="input text-[12px] py-1"
-                />
-                <textarea
-                  name="content"
-                  rows={4}
-                  placeholder="content…"
-                  className="input text-[12px] font-mono"
-                />
-                <button type="submit" className="btn btn-secondary btn-sm w-full">
-                  Create
-                </button>
-              </form>
-            </details>
-          </div>
-
-          <details className="surface text-[12px]">
-            <summary className="px-4 py-2 cursor-pointer select-none flex items-center justify-between">
-              <span>Recent snapshots ({snaps.length})</span>
-              <span className="text-[10px] text-[color:var(--color-ink-soft)]">
-                history
-              </span>
-            </summary>
-            <ul className="px-4 pb-3 space-y-1.5">
-              {snaps.map((s) => {
-                const diff = fileDiffSummary(s.parent_snapshot_id, s.id);
-                return (
-                  <li
-                    key={s.id}
-                    className="flex items-center justify-between gap-2"
-                  >
-                    <div className="min-w-0">
-                      <Link
-                        href={`/app/c/${convId}/workspace/${ws.id}/snap/${s.id}`}
-                        className="font-mono underline"
-                      >
-                        {shortenSha(s.id)}
-                      </Link>{" "}
-                      <span>{s.commit_message || "—"}</span>
-                    </div>
-                    <span className="text-[10px] text-[color:var(--color-ink-soft)]">
-                      {diff.length} file{diff.length === 1 ? "" : "s"}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          </details>
         </section>
 
-        {/* ─── RIGHT: Access panel (preserved) ─────────── */}
+        {/* ─── RIGHT: Access ─────────── */}
         <aside className="surface p-3 max-h-[80vh] overflow-y-auto md:sticky md:top-4 self-start">
-          <div className="text-[11px] uppercase tracking-wider text-[color:var(--color-ink-soft)] mb-2 px-1">
+          <div className="text-[10px] uppercase tracking-wider text-[color:var(--color-ink-soft)] mb-2 px-1">
             Access ({subs.length})
           </div>
           <ul className="space-y-1.5">
             {members.map((m) => {
-              const role = subs.find((s) => s.agent_id === m.id)?.role ?? "none";
+              const role =
+                subs.find((s) => s.agent_id === m.id)?.role ?? "none";
               return (
                 <li key={m.id} className="px-1">
-                  <div className="text-[12px] flex items-center gap-2 mb-1">
+                  <div className="text-[12px] flex items-center gap-1.5 mb-0.5 truncate">
                     <span>{m.avatar_emoji}</span>
                     <span className="font-mono truncate">{m.id}</span>
                   </div>
-                  <form
-                    action={setRoleAction}
-                    className="flex items-center gap-1.5"
-                  >
+                  <form action={setRoleAction} className="flex items-center gap-1">
                     <input type="hidden" name="conversation_id" value={convId} />
                     <input type="hidden" name="workspace_id" value={ws.id} />
                     <input type="hidden" name="agent_id" value={m.id} />
                     <select
                       name="role"
                       defaultValue={role}
-                      className="input text-[12px] py-0.5 flex-1"
+                      className="input text-[11px] py-0.5 flex-1"
                     >
                       <option value="none">none</option>
                       <option value="reader">reader</option>
@@ -510,128 +392,177 @@ export default async function WorkspaceDetailPage({
             })}
           </ul>
           <p className="text-[10px] text-[color:var(--color-ink-soft)] mt-3 px-1 leading-relaxed">
-            This workspace is bound to this conversation. Only members of the
-            room reach it; agents on the outside cannot.
+            Bound to this conversation. Outsiders can't reach it.
           </p>
+
+          {/* Hidden delete forms — one per file. We render them in the aside
+              so the visible delete buttons in FileRow can target them via
+              `form="del-<id>"` without nesting <form> in <form>. */}
+          {files.map((f) => (
+            <form
+              key={`delform-${f.path}`}
+              id={`del-${cssIdFor(f.path)}`}
+              action={deleteFileAction}
+              className="hidden"
+            >
+              <input type="hidden" name="conversation_id" value={convId} />
+              <input type="hidden" name="workspace_id" value={ws.id} />
+              <input type="hidden" name="path" value={f.path} />
+            </form>
+          ))}
         </aside>
       </main>
     </div>
   );
 }
 
+// CSS-safe id for use in `form=` attribute referencing.
+function cssIdFor(path: string): string {
+  return path.replace(/[^A-Za-z0-9_-]/g, "_");
+}
+
 // ──────────────────────────────────────────────────────────────────────────
-// File row — collapsed by default, expanded preview when ?open=path
+// Finder-style file area
 // ──────────────────────────────────────────────────────────────────────────
 
-function FileRow({
-  f,
-  expanded,
+function FinderArea({
+  root,
   convId,
   wsId,
-  headRev,
+  fileCount,
 }: {
-  f: {
-    snapshot_id: string;
-    path: string;
-    content_sha256: string;
-    size_bytes: number;
-  };
-  expanded: boolean;
+  root: TreeNode;
   convId: string;
   wsId: string;
-  headRev: string;
+  fileCount: number;
 }) {
-  const isImage = /\.(png|jpe?g|gif|webp)$/i.test(f.path);
-  // Cap preview reads so a huge file doesn't tank the page.
-  const tooLarge = f.size_bytes > PREVIEW_BYTE_CAP;
-  let bodyText = "";
-  let binary = false;
-  let missing = false;
-  if (expanded && !tooLarge) {
-    const rf = readFileAt(headRev, f.path);
-    if (rf) {
-      missing = !!rf.missing;
-      binary = !isLikelyText(rf.content);
-      if (!binary) bodyText = rf.content.toString("utf8");
-    }
-  }
-  const closeUrl = `/app/c/${convId}/workspace/${wsId}`;
-  const openUrl = `/app/c/${convId}/workspace/${wsId}?open=${encodeURIComponent(f.path)}`;
-
   return (
-    <>
-      <Link
-        href={expanded ? closeUrl : openUrl}
-        className="flex items-center gap-2 px-4 py-2 hover:bg-[color:var(--color-canvas)] transition-colors"
-      >
-        <span className="text-base">{fileIcon(f.path)}</span>
-        <span className="font-mono text-[13px] truncate flex-1">{f.path}</span>
-        <span className="text-[11px] text-[color:var(--color-ink-soft)] tabular-nums">
-          {formatSize(f.size_bytes)}
-        </span>
-        <span className="text-[color:var(--color-ink-soft)] text-[12px]">
-          {expanded ? "▴" : "▾"}
-        </span>
-      </Link>
-      {expanded ? (
-        <div className="px-4 pb-4 pt-1 bg-[color:var(--color-canvas)]/40 border-t border-[color:var(--color-line)]">
-          {tooLarge ? (
-            <p className="text-[12px] text-[color:var(--color-ink-soft)] italic">
-              File too large to preview ({formatSize(f.size_bytes)}). Use the
-              v1 REST API to fetch raw bytes.
-            </p>
-          ) : isImage ? (
-            <p className="text-[12px] text-[color:var(--color-ink-soft)] italic">
-              Image preview is not yet wired through the workspace blob route —
-              v1 REST returns raw bytes if you need them.
-            </p>
-          ) : missing ? (
-            <p className="text-[12px] text-[color:var(--color-tint-pink-ink)]">
-              Blob missing on disk — DB row exists, file lost. Re-upload to
-              restore.
-            </p>
-          ) : binary ? (
-            <p className="text-[12px] text-[color:var(--color-ink-soft)] italic">
-              Binary file — preview suppressed.
-            </p>
-          ) : (
-            <form action={modifyFileAction} className="space-y-2">
-              <input type="hidden" name="conversation_id" value={convId} />
-              <input type="hidden" name="workspace_id" value={wsId} />
-              <input type="hidden" name="against_rev" value={headRev} />
-              <input type="hidden" name="path" value={f.path} />
-              <textarea
-                name="content"
-                defaultValue={bodyText}
-                rows={Math.min(28, Math.max(6, bodyText.split("\n").length + 1))}
-                className="input text-[12px] font-mono w-full"
-              />
-              <div className="flex items-center gap-2">
-                <input
-                  name="commit_message"
-                  placeholder="commit message (optional)"
-                  className="input text-[12px] py-1 flex-1"
-                />
-                <button type="submit" className="btn btn-primary btn-sm">
-                  Save
-                </button>
-                <form action={deleteFileAction} className="contents">
-                  <input type="hidden" name="conversation_id" value={convId} />
-                  <input type="hidden" name="workspace_id" value={wsId} />
-                  <input type="hidden" name="path" value={f.path} />
-                  <button type="submit" className="btn btn-ghost btn-sm">
-                    Delete
-                  </button>
-                </form>
-              </div>
-              <p className="text-[10px] text-[color:var(--color-ink-soft)]">
-                Edits commit a new snapshot. SSE pushes the change to everyone
-                viewing this room.
-              </p>
-            </form>
-          )}
+    <div className="surface overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-[color:var(--color-line)] flex items-center justify-between">
+        <div className="font-semibold text-[13px]">
+          📁 Files{" "}
+          <span className="text-[color:var(--color-ink-soft)] font-normal">
+            ({fileCount})
+          </span>
         </div>
-      ) : null}
-    </>
+        <div className="text-[10px] text-[color:var(--color-ink-soft)]">
+          live
+        </div>
+      </div>
+      {fileCount === 0 ? (
+        <div className="px-4 py-10 text-center text-[12px] text-[color:var(--color-ink-soft)]">
+          Empty — upload below.
+        </div>
+      ) : (
+        <ul className="py-1">
+          {sortedChildren(root).map((c) => (
+            <Node key={c.fullPath} node={c} depth={0} convId={convId} wsId={wsId} />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function Node({
+  node,
+  depth,
+  convId,
+  wsId,
+}: {
+  node: TreeNode;
+  depth: number;
+  convId: string;
+  wsId: string;
+}) {
+  if (node.file) {
+    return (
+      <FileLeaf
+        path={node.file.path}
+        name={node.name}
+        size={node.file.size_bytes}
+        depth={depth}
+        convId={convId}
+        wsId={wsId}
+      />
+    );
+  }
+  // Folder
+  const count = countDescendants(node);
+  return (
+    <li>
+      <details>
+        <summary
+          className="flex items-center gap-1.5 py-1 px-3 cursor-pointer select-none hover:bg-[color:var(--color-canvas)] transition-colors text-[13px]"
+          style={{ paddingLeft: 12 + depth * 16 }}
+        >
+          <span className="text-[10px] text-[color:var(--color-ink-soft)] inline-block w-3">
+            ▸
+          </span>
+          <span>📁</span>
+          <span className="flex-1 truncate">{node.name}</span>
+          <span className="text-[11px] text-[color:var(--color-ink-soft)] tabular-nums">
+            {count} item{count === 1 ? "" : "s"}
+          </span>
+        </summary>
+        <ul>
+          {sortedChildren(node).map((c) => (
+            <Node
+              key={c.fullPath}
+              node={c}
+              depth={depth + 1}
+              convId={convId}
+              wsId={wsId}
+            />
+          ))}
+        </ul>
+      </details>
+    </li>
+  );
+}
+
+function FileLeaf({
+  path,
+  name,
+  size,
+  depth,
+  convId,
+  wsId,
+}: {
+  path: string;
+  name: string;
+  size: number;
+  depth: number;
+  convId: string;
+  wsId: string;
+}) {
+  // Note: we do NOT render an inline edit form here (per design — files are
+  // display-only in the UI; agents do the editing via tools). The ✕ button
+  // submits the hidden delete form rendered in the page's right aside, so we
+  // avoid nesting <form> inside <form>.
+  void convId;
+  void wsId;
+  return (
+    <li
+      className="group flex items-center gap-1.5 py-1 px-3 hover:bg-[color:var(--color-canvas)] transition-colors text-[13px]"
+      style={{ paddingLeft: 12 + (depth + 0.6) * 16 }}
+    >
+      <span className="text-[10px] text-[color:var(--color-ink-soft)] inline-block w-3">
+        {" "}
+      </span>
+      <span>{fileIcon(name)}</span>
+      <span className="flex-1 truncate font-mono">{name}</span>
+      <span className="text-[11px] text-[color:var(--color-ink-soft)] tabular-nums">
+        {formatSize(size)}
+      </span>
+      <button
+        type="submit"
+        form={`del-${cssIdFor(path)}`}
+        title={`Delete ${path}`}
+        className="opacity-0 group-hover:opacity-100 transition-opacity text-[color:var(--color-ink-soft)] hover:text-[color:var(--color-danger)] px-1 text-[12px]"
+      >
+        ✕
+      </button>
+    </li>
   );
 }

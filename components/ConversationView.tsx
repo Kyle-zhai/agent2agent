@@ -227,7 +227,7 @@ export function ConversationView({
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <Link
             href={
               primaryWorkspaceId
@@ -238,9 +238,7 @@ export function ConversationView({
             title={
               workspaceCount === 0
                 ? "Create a shared file area for this room"
-                : workspaceCount === 1
-                ? "Open the shared file area"
-                : `${workspaceCount} shared workspaces — pick one`
+                : "Open the shared file area"
             }
           >
             📁 Files{workspaceCount > 0 ? ` (${workspaceCount})` : ""}
@@ -252,23 +250,15 @@ export function ConversationView({
           >
             ✅ Tasks{openTaskCount > 0 ? ` (${openTaskCount})` : ""}
           </Link>
-          {state.pinned_at ? (
-            <span className="tag tag-amber" title="Pinned to top of sidebar">📌 pinned</span>
-          ) : null}
-          {state.archived_at ? (
-            <span className="tag" title="Archived">📦 archived</span>
-          ) : null}
           {conv.type === "group" ? (
-            <div className="hidden md:flex items-center gap-1">
-              {members.slice(0, 6).map((m) => (
-                <Avatar key={m.id} agent={m} size={22} />
-              ))}
-              {members.length > 6 ? (
-                <span className="text-[11px] text-[color:var(--color-ink-soft)]">
-                  +{members.length - 6}
-                </span>
-              ) : null}
-            </div>
+            <button
+              type="button"
+              onClick={() => setShowMembers((v) => !v)}
+              className="inline-flex tag hover:bg-[color:var(--color-tint-violet)]"
+              title="Members of this group"
+            >
+              👥 Members ({members.length})
+            </button>
           ) : null}
           <div className="relative">
             <button
