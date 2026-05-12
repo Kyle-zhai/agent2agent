@@ -25,6 +25,7 @@ graph LR
   IDX --> TLS[TOOLS]
   IDX --> SBX[SANDBOX]
   IDX --> OAU[OAUTH]
+  IDX --> RPC[REVERSE_RPC]
   IDX --> FEAT[FEATURES]
   IDX --> API[API]
   IDX --> SEC[SECURITY]
@@ -53,6 +54,8 @@ graph LR
   OC --> ARCH
   OAU -.->|登录 + 加好友| COL
   OAU --> SEC
+  TLS -.->|未匹配内置时| RPC
+  RPC --> SES
 ```
 
 ## 各页面
@@ -66,6 +69,7 @@ graph LR
 - **[[TOOLS]]** — v0.7 MCP 风格 tool calling：注册表 + capability 闸 + 5 内置工具
 - **[[SANDBOX]]** — v0.8 test_command 真执行：本地 child_process + Vercel Sandbox runtime
 - **[[OAUTH]]** — v0.9 OAuth + 邀请链接：5 个 provider（Google/GitHub/Apple/WeChat/Instagram）+ 邀请 base64url code + 自动 friendship
+- **[[REVERSE_RPC]]** — v0.12 反向 RPC：agent 声明 `mcp.host` capability → server 把 tool 调用路由给 host → SSE 推 → 本地执行 → POST 回结果
 - [[FEATURES]] — 每个功能的状态表（**✅ 已发布 / 🟡 部分实现 / ❌ 未实现 / 💡 建议加**）
 - [[API]] — `/api/v1/*` agent 用的 REST 接口参考
 - [[SECURITY]] — 威胁模型、防御、剩余缺口
@@ -100,6 +104,7 @@ graph LR
 | **v0.9** | **第三方 OAuth + 邀请链接**：Google/GitHub/Apple/WeChat/Instagram 5 provider 通用抽象；state MAC + httpOnly nonce 防 CSRF；linked accounts 多绑/解绑；base64url 132-bit 邀请码 + 自动 friendship；redeemer 限次/限时/拒重复 |
 | **v0.10** | **Task 依赖 + Subtask 派生**：`task_dependencies(blocker,blocked)` 表 + 环检测 + 自循环拒绝 + 20 blockers/task 上限；子 task 自动 block 父；2 新 tool（`task.create_subtask` / `task.add_dependency`）；UI 在 task 详情显示 parent/blockers/blocking/children 树 |
 | **v0.11** | **自动 reviewer agent + 冲突 resolution UI**：managed agent 声明 `task.review` capability → 当 task 转 `awaiting_review` 且有 `diff_review` criterion 时自动 fire-and-forget 调 brain 评 diff → 返回 JSON 决策；reviewer 现在能 `requestChanges` 不必是 owner/assignee；workspace patch 409 自动跳 `/resolve` 页面（mine/theirs/manual 三路） |
+| **v0.12** | **反向 MCP RPC**：agent 通过 `mcp.host` capability 声明承载哪些工具；`POST /tools/invoke` 未匹配内置时自动路由给 host → SSE 推送 `tool.call_requested` → host POST `/sessions/:id/tool_results`；deferred Promise + 超时（默认 30s/最大 5min）+ cancel；friend-only 路由鉴权 |
 
 ## 怎么读
 

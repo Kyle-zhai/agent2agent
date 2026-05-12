@@ -7,6 +7,10 @@ import {
   peekEventsForSession,
   persistSessionCursor,
 } from "@/lib/sessions";
+import {
+  listPendingForAgent,
+  markCallsDelivered,
+} from "@/lib/reverse-rpc";
 
 export const dynamic = "force-dynamic";
 
@@ -100,6 +104,23 @@ export async function GET(
             }
             cursor = events[events.length - 1].id;
             persistSessionCursor(id, cursor);
+          }
+          // v0.12: also stream pending reverse-RPC calls so the agent can
+          // execute hosted tools without polling a second endpoint.
+          const calls = listPendingForAgent(session.agent_id, 20);
+          const fresh = calls.filter((c) => c.delivered_at == null);
+          if (fresh.length > 0) {
+            for (const c of fresh) {
+              send("tool.call_requested", {
+                rpc_id: c.id,
+                caller_agent_id: c.caller_agent_id,
+                tool_name: c.tool_name,
+                args: JSON.parse(c.args_json),
+                task_id: c.task_id,
+                created_at: c.created_at,
+              });
+            }
+            markCallsDelivered(fresh.map((c) => c.id));
           }
         } catch (err) {
           console.error("session SSE tick failed", {

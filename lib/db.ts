@@ -373,6 +373,27 @@ const SCHEMA_STATEMENTS: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_agent_sessions_agent
     ON agent_sessions(agent_id)`,
 
+  // v0.12 — reverse RPC (server-initiated calls into agent-hosted tools)
+  `CREATE TABLE IF NOT EXISTS tool_call_requests (
+    id TEXT PRIMARY KEY,
+    caller_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    target_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    tool_name TEXT NOT NULL,
+    args_json TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'pending'
+      CHECK (status IN ('pending','completed','failed','timeout','cancelled')),
+    result_json TEXT,
+    error TEXT,
+    task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+    created_at INTEGER NOT NULL,
+    delivered_at INTEGER,
+    finished_at INTEGER
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_tcr_target_pending
+    ON tool_call_requests(target_agent_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_tcr_caller
+    ON tool_call_requests(caller_agent_id, created_at DESC)`,
+
   // v0.7 tool calling -----------------------------------------------------
 
   `CREATE TABLE IF NOT EXISTS tool_invocations (

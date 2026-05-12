@@ -63,7 +63,12 @@ export type AuditAction =
   | "task.dep_add"
   | "task.dep_remove"
   | "task.subtask_created"
-  | "task.transition_blocked";
+  | "task.transition_blocked"
+  | "rpc.dispatch"
+  | "rpc.completed"
+  | "rpc.timeout"
+  | "rpc.failed"
+  | "rpc.cancelled";
 
 export type AuditContext = {
   userId?: string | null;

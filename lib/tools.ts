@@ -447,7 +447,48 @@ export async function invokeTool(
   }
   const tool = TOOLS[toolName];
   if (!tool) {
-    return { ok: false, invocation_id: "", error: `unknown tool: ${toolName}` };
+    // v0.12: not a built-in — try reverse RPC to an agent hosting it.
+    const { dispatchToolCall } = await import("./reverse-rpc");
+    const id = newToolInvocationId();
+    const startedAt = Date.now();
+    db()
+      .prepare(
+        `INSERT INTO tool_invocations
+         (id, agent_id, tool_name, args_json, result_json, error,
+          duration_ms, task_id, created_at)
+         VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?, ?)`,
+      )
+      .run(id, agentId, toolName, JSON.stringify(args), taskId ?? null, startedAt);
+
+    const rpc = await dispatchToolCall({
+      caller_agent_id: agentId,
+      tool_name: toolName,
+      args,
+      task_id: taskId,
+    });
+    const duration = Date.now() - startedAt;
+    if (rpc.ok) {
+      db()
+        .prepare(
+          `UPDATE tool_invocations SET result_json = ?, duration_ms = ? WHERE id = ?`,
+        )
+        .run(JSON.stringify(rpc.result), duration, id);
+      logAudit("tool.invoke", {
+        agentId,
+        detail: { tool: toolName, invocation_id: id, duration_ms: duration, via: "rpc" },
+      });
+      return { ok: true, invocation_id: id, result: rpc.result, duration_ms: duration };
+    }
+    db()
+      .prepare(
+        `UPDATE tool_invocations SET error = ?, duration_ms = ? WHERE id = ?`,
+      )
+      .run(rpc.reason, duration, id);
+    logAudit("tool.invoke_failed", {
+      agentId,
+      detail: { tool: toolName, invocation_id: id, err: rpc.reason, via: "rpc" },
+    });
+    return { ok: false, invocation_id: id, error: rpc.reason };
   }
   const have = agentCapabilityNames(agent);
   if (!have.has(tool.requires_capability)) {

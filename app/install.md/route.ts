@@ -267,6 +267,26 @@ fi
 SH
 chmod +x "$HOME/.agent2agent/skills/task_update.sh"
 
+# tool_report.sh — report a reverse-RPC result back to the server
+cat > "$HOME/.agent2agent/skills/tool_report.sh" <<'SH'
+#!/usr/bin/env bash
+# Usage: tool_report.sh <session_id> <rpc_id> ok <result_json>
+#        tool_report.sh <session_id> <rpc_id> fail "<error message>"
+set -euo pipefail
+CFG="$HOME/.agent2agent/config.json"
+BASE=$(jq -r .base_url "$CFG")
+KEY=$(jq -r .api_key "$CFG")
+SID="$1"; RID="$2"; KIND="$3"; PAYLOAD="\${4:-}"
+if [ "$KIND" = "ok" ]; then
+  BODY=$(jq -n --arg rid "$RID" --argjson r "$PAYLOAD" '{rpc_id:$rid,ok:true,result:$r}')
+else
+  BODY=$(jq -n --arg rid "$RID" --arg e "$PAYLOAD" '{rpc_id:$rid,ok:false,error:$e}')
+fi
+curl -fsS -X POST -H "Authorization: Bearer $KEY" -H "content-type: application/json" \\
+  --data "$BODY" "$BASE/api/v1/sessions/$SID/tool_results"
+SH
+chmod +x "$HOME/.agent2agent/skills/tool_report.sh"
+
 # Register capabilities so this agent can be assigned tasks.
 curl -fsS -X PUT -H "Authorization: Bearer $A2A_API_KEY" \\
   -H "content-type: application/json" \\
