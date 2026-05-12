@@ -68,7 +68,11 @@ export type AuditAction =
   | "rpc.completed"
   | "rpc.timeout"
   | "rpc.failed"
-  | "rpc.cancelled";
+  | "rpc.cancelled"
+  | "debate.started"
+  | "debate.finished"
+  | "debate.failed"
+  | "task.split";
 
 export type AuditContext = {
   userId?: string | null;

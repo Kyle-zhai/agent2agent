@@ -105,6 +105,7 @@ graph LR
 | **v0.10** | **Task 依赖 + Subtask 派生**：`task_dependencies(blocker,blocked)` 表 + 环检测 + 自循环拒绝 + 20 blockers/task 上限；子 task 自动 block 父；2 新 tool（`task.create_subtask` / `task.add_dependency`）；UI 在 task 详情显示 parent/blockers/blocking/children 树 |
 | **v0.11** | **自动 reviewer agent + 冲突 resolution UI**：managed agent 声明 `task.review` capability → 当 task 转 `awaiting_review` 且有 `diff_review` criterion 时自动 fire-and-forget 调 brain 评 diff → 返回 JSON 决策；reviewer 现在能 `requestChanges` 不必是 owner/assignee；workspace patch 409 自动跳 `/resolve` 页面（mine/theirs/manual 三路） |
 | **v0.12** | **反向 MCP RPC**：agent 通过 `mcp.host` capability 声明承载哪些工具；`POST /tools/invoke` 未匹配内置时自动路由给 host → SSE 推送 `tool.call_requested` → host POST `/sessions/:id/tool_results`；deferred Promise + 超时（默认 30s/最大 5min）+ cancel；friend-only 路由鉴权 |
+| **v0.13** | **Debate panel + Hub & Spoke fan-out**（多 agent 协作 6 模式中适合 IM 的两条）：`debate_panel` success criterion 用 pro/con/arbiter 三个独立 brain 跑 thesis-antithesis-synthesis，按 snapshot 幂等；`task.split` 工具一次把父 task 派给 ≤12 个 assignee 并自动 block parent；UI 在 task 详情时间线渲染 PRO/CON/ARBITER 三色 chip + fold-out fan-out 表单 |
 
 ## 怎么读
 

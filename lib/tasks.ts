@@ -151,6 +151,23 @@ function validateSuccessCriteria(input: unknown): SuccessCriterion[] {
           approver_agent_id: obj.approver_agent_id,
         });
         break;
+      case "debate_panel":
+        if (
+          typeof obj.pro_agent_id !== "string" ||
+          typeof obj.con_agent_id !== "string" ||
+          typeof obj.arbiter_agent_id !== "string"
+        ) {
+          throw new Error(
+            "debate_panel requires pro_agent_id / con_agent_id / arbiter_agent_id strings.",
+          );
+        }
+        out.push({
+          type: "debate_panel",
+          pro_agent_id: obj.pro_agent_id,
+          con_agent_id: obj.con_agent_id,
+          arbiter_agent_id: obj.arbiter_agent_id,
+        });
+        break;
       default:
         throw new Error(`Unknown success criterion type: ${String(type)}`);
     }
@@ -701,6 +718,21 @@ async function evaluateOne(
             reason: `diff_review: need ${c.min_approvers} approvers with capability ${c.approver_capability ?? "*"}, have ${approvers.size}`,
           };
     }
+    case "debate_panel": {
+      // lazy import to avoid circular (debate.ts imports parseRequiredCapabilities etc.)
+      const mod = await import("./debate");
+      const res = await mod.runDebate(task, {
+        pro_agent_id: c.pro_agent_id,
+        con_agent_id: c.con_agent_id,
+        arbiter_agent_id: c.arbiter_agent_id,
+      });
+      if (!res.ok) return { ok: false, reason: `debate_panel: ${res.reason}` };
+      if (res.decision === "approve") return { ok: true };
+      return {
+        ok: false,
+        reason: `debate_panel arbiter said request_changes: ${res.reason}`,
+      };
+    }
     case "test_command": {
       const snapId = ctx.result_snapshot_id ?? task.result_snapshot_id;
       if (!snapId) {
@@ -987,6 +1019,65 @@ export function isTaskBlocked(taskId: string): {
     }
   }
   return { blocked: unmet.length > 0, unmet_blockers: unmet };
+}
+
+/** Hub & Spoke: atomically create N sibling subtasks under one parent.
+ *  Each child blocks the parent (via createSubtask), and the actor must
+ *  be parent owner OR assignee. Returns the created children. */
+export function splitTask(input: {
+  parent_task_id: string;
+  actor_agent_id: string;
+  branches: Array<{
+    title: string;
+    description?: string;
+    assigned_to_agent_id?: string | null;
+    required_capabilities?: string[];
+    success_criteria?: unknown;
+  }>;
+}): Task[] {
+  const parent = getTask(input.parent_task_id);
+  if (!parent) throw new Error("Parent task not found.");
+  if (
+    parent.owner_agent_id !== input.actor_agent_id &&
+    parent.assigned_to_agent_id !== input.actor_agent_id
+  ) {
+    throw new Error("Only the parent's owner or assignee can split it.");
+  }
+  if (input.branches.length === 0) {
+    throw new Error("At least one branch required.");
+  }
+  if (input.branches.length > 12) {
+    throw new Error("At most 12 branches per split.");
+  }
+  // Validate each branch up-front so we don't create half the fan-out before
+  // failing on a typo. This loop runs inside the tx callback below; but
+  // capability checks etc. live in createTask which createSubtask calls,
+  // so we just run all of them and rely on the tx to roll back on any throw.
+  const created: Task[] = [];
+  const tx = db().transaction(() => {
+    for (const b of input.branches) {
+      const child = createSubtask({
+        parent_task_id: parent.id,
+        title: b.title,
+        description: b.description,
+        owner_agent_id: input.actor_agent_id,
+        assigned_to_agent_id: b.assigned_to_agent_id ?? null,
+        required_capabilities: b.required_capabilities,
+        success_criteria: b.success_criteria,
+      });
+      created.push(child);
+    }
+  });
+  tx();
+  logAudit("task.split", {
+    agentId: input.actor_agent_id,
+    detail: {
+      parent: parent.id,
+      branch_count: input.branches.length,
+      children: created.map((c) => c.id),
+    },
+  });
+  return created;
 }
 
 export function createSubtask(input: {

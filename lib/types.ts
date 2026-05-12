@@ -206,7 +206,13 @@ export type SuccessCriterion =
   | { type: "diff_review"; min_approvers: number; approver_capability?: string }
   | { type: "diff_pattern"; forbidden?: string[]; required?: string[] }
   | { type: "capability_check"; must_include: string[] }
-  | { type: "manual"; approver_agent_id: string };
+  | { type: "manual"; approver_agent_id: string }
+  | {
+      type: "debate_panel";
+      pro_agent_id: string;
+      con_agent_id: string;
+      arbiter_agent_id: string;
+    };
 
 export type Task = {
   id: string;
@@ -235,7 +241,9 @@ export type TaskEventKind =
   | "review_requested"
   | "approved"
   | "changes_requested"
-  | "criteria_failed";
+  | "criteria_failed"
+  | "debate_argument"
+  | "debate_finished";
 
 export type TaskEvent = {
   id: number;

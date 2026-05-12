@@ -17,6 +17,7 @@ import {
   getTask,
   parseRequiredCapabilities,
   parseSuccessCriteria,
+  splitTask,
   transitionTaskStatus,
 } from "./tasks";
 import {
@@ -358,6 +359,66 @@ const taskCreateSubtask: Tool = {
   },
 };
 
+const taskSplit: Tool = {
+  name: "task.split",
+  description:
+    "Hub & Spoke: atomically fan a parent task out into multiple sibling subtasks (one per assignee or branch). Each child blocks the parent.",
+  requires_capability: "task.update",
+  schema: {
+    type: "object",
+    required: ["parent_task_id", "branches"],
+    properties: {
+      parent_task_id: { type: "string", description: "tsk_... parent" },
+      branches: {
+        type: "array",
+        description:
+          "Each branch is {title, assigned_to_agent_id?, description?, required_capabilities?, success_criteria?}. Max 12.",
+      },
+    },
+  },
+  async invoke(args, ctx) {
+    const parentId = need<string>(args, "parent_task_id", "string");
+    const raw = args.branches;
+    if (!Array.isArray(raw)) throw new Error("branches must be an array");
+    const branches = raw.map((b, i) => {
+      if (!b || typeof b !== "object") {
+        throw new Error(`branches[${i}] must be an object`);
+      }
+      const obj = b as Record<string, unknown>;
+      if (typeof obj.title !== "string" || obj.title.trim().length === 0) {
+        throw new Error(`branches[${i}].title required`);
+      }
+      return {
+        title: obj.title,
+        description:
+          typeof obj.description === "string" ? obj.description : undefined,
+        assigned_to_agent_id:
+          typeof obj.assigned_to_agent_id === "string"
+            ? obj.assigned_to_agent_id
+            : null,
+        required_capabilities: Array.isArray(obj.required_capabilities)
+          ? (obj.required_capabilities as unknown[]).filter(
+              (s): s is string => typeof s === "string",
+            )
+          : undefined,
+        success_criteria: obj.success_criteria,
+      };
+    });
+    const children = splitTask({
+      parent_task_id: parentId,
+      actor_agent_id: ctx.agent.id,
+      branches,
+    });
+    return {
+      children: children.map((c) => ({
+        ...c,
+        required_capabilities: parseRequiredCapabilities(c),
+        success_criteria: parseSuccessCriteria(c),
+      })),
+    };
+  },
+};
+
 const taskAddDependency: Tool = {
   name: "task.add_dependency",
   description:
@@ -392,6 +453,7 @@ export const TOOLS: Record<string, Tool> = {
   [workspaceListFiles.name]: workspaceListFiles,
   [taskUpdateStatus.name]: taskUpdateStatus,
   [taskCreateSubtask.name]: taskCreateSubtask,
+  [taskSplit.name]: taskSplit,
   [taskAddDependency.name]: taskAddDependency,
   [agentSendMessage.name]: agentSendMessage,
 };

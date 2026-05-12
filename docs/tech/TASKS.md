@@ -49,6 +49,7 @@ Capability 用 `PUT /api/v1/agents/me/capabilities` 注册（install.md 里 defa
 | `diff_pattern` | `{"type":"diff_pattern","forbidden":["console\\.log","TODO"],"required":["CHECK"]}` | 对 `result_snapshot_id` 对比父快照后 concat 所有改动过的文本，按正则校验 |
 | `diff_review` | `{"type":"diff_review","min_approvers":2,"approver_capability":"task.review"}` | 至少 N 个独立 approver；可选要求 approver 有某 capability |
 | `manual` | `{"type":"manual","approver_agent_id":"alice.coding.7f3d"}` | 必须指定 agent 本人来关 |
+| `debate_panel` (v0.13) | `{"type":"debate_panel","pro_agent_id":"a","con_agent_id":"b","arbiter_agent_id":"c"}` | 三个独立 brain：正方/反方/仲裁。按 result_snapshot_id 幂等：重跑命中已有 `debate_finished` 事件直接返回，不再调 brain。事件流里以 PRO/CON/ARBITER 三色 chip 渲染 |
 | `test_command` | `{"type":"test_command","cmd":"npm test","sandbox":"vercel"}` | v0.5 **不执行**（沙箱在 v0.6）；当前永远 fail，提示升级 |
 
 `test_command` 这条 v0.5 故意 surface 成显式失败而不是悄悄 pass。这是个 design choice：**未实现的判据 ≠ 通过的判据**。沙箱在 v0.6。
@@ -179,6 +180,7 @@ CREATE TABLE task_dependencies (
 | Tool | requires | 作用 |
 |---|---|---|
 | `task.create_subtask` | `task.update` | 父下建子 + 自动加 blocking edge |
+| `task.split` (v0.13) | `task.update` | Hub & Spoke：父下原子建 N (≤12) 个 sibling subtask；每个 block 父；branch 任一抛错整条 tx 回滚 |
 | `task.add_dependency` | `task.update` | 显式建 blocker→blocked 边 |
 
 ### UI（task 详情页右栏）

@@ -26,6 +26,7 @@ import {
   parseSuccessCriteria,
   removeTaskDependency,
   requestChanges,
+  splitTask,
   transitionTaskStatus,
 } from "@/lib/tasks";
 import {
@@ -192,6 +193,47 @@ async function removeDepAction(formData: FormData) {
   }
   revalidatePath(`/app/c/${convId}/tasks/${taskId}`);
   redirect(`/app/c/${convId}/tasks/${taskId}`);
+}
+
+async function splitTaskAction(formData: FormData) {
+  "use server";
+  const user = await requireUser();
+  const convId = String(formData.get("conversation_id") ?? "");
+  const parentId = String(formData.get("parent_task_id") ?? "");
+  const titlesRaw = String(formData.get("titles") ?? "");
+  const assigneesRaw = formData.getAll("assignees").map(String);
+  const { myAgentId } = requireUserMember(convId, user.id);
+  const titles = titlesRaw
+    .split(/\r?\n/)
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0);
+  if (titles.length === 0) {
+    redirect(`/app/c/${convId}/tasks/${parentId}?error=at+least+one+title`);
+  }
+  if (titles.length > assigneesRaw.length && assigneesRaw.length > 0) {
+    // pad with last assignee
+    while (assigneesRaw.length < titles.length) {
+      assigneesRaw.push(assigneesRaw[assigneesRaw.length - 1]);
+    }
+  }
+  try {
+    splitTask({
+      parent_task_id: parentId,
+      actor_agent_id: myAgentId,
+      branches: titles.map((t, i) => ({
+        title: t,
+        assigned_to_agent_id: assigneesRaw[i] || null,
+      })),
+    });
+  } catch (err) {
+    redirect(
+      `/app/c/${convId}/tasks/${parentId}?error=${encodeURIComponent(
+        err instanceof Error ? err.message : "Split failed.",
+      )}`,
+    );
+  }
+  revalidatePath(`/app/c/${convId}/tasks/${parentId}`);
+  redirect(`/app/c/${convId}/tasks/${parentId}`);
 }
 
 async function createSubtaskAction(formData: FormData) {
@@ -381,6 +423,43 @@ export default async function TaskDetailPage({
                       <p className="mt-1 whitespace-pre-wrap">
                         {payload.body as string}
                       </p>
+                    ) : e.kind === "debate_argument" &&
+                      typeof payload.text === "string" ? (
+                      <div className="mt-1">
+                        <span
+                          className={
+                            "tag text-[10px] mr-2 " +
+                            (payload.role === "pro"
+                              ? "tag-green"
+                              : payload.role === "con"
+                              ? "tag-pink"
+                              : "tag-violet")
+                          }
+                        >
+                          {String(payload.role).toUpperCase()}
+                        </span>
+                        <span className="whitespace-pre-wrap">
+                          {payload.text as string}
+                        </span>
+                      </div>
+                    ) : e.kind === "debate_finished" ? (
+                      <div className="mt-1 text-[12px]">
+                        <span
+                          className={
+                            "tag text-[10px] mr-2 " +
+                            (payload.decision === "approve"
+                              ? "tag-green"
+                              : "tag-amber")
+                          }
+                        >
+                          ⚖ {String(payload.decision)}
+                        </span>
+                        {typeof payload.reason === "string" ? (
+                          <span className="whitespace-pre-wrap">
+                            {payload.reason as string}
+                          </span>
+                        ) : null}
+                      </div>
                     ) : (
                       <pre className="text-[11px] text-[color:var(--color-ink-soft)] mt-1 whitespace-pre-wrap">
                         {Object.keys(payload).length > 0
@@ -708,38 +787,82 @@ export default async function TaskDetailPage({
               </ul>
             )}
             {isOwner || isAssignee ? (
-              <form
-                action={createSubtaskAction}
-                className="space-y-1.5"
-              >
-                <input type="hidden" name="conversation_id" value={convId} />
-                <input type="hidden" name="parent_task_id" value={t.id} />
-                <input
-                  name="title"
-                  required
-                  maxLength={200}
-                  placeholder="Subtask title…"
-                  className="input text-[12px] py-1"
-                />
-                <select
-                  name="assigned_to_agent_id"
-                  className="input text-[12px] py-1"
-                  defaultValue=""
+              <>
+                <form
+                  action={createSubtaskAction}
+                  className="space-y-1.5"
                 >
-                  <option value="">(unassigned)</option>
-                  {members.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.avatar_emoji} {m.display_name}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="submit"
-                  className="btn btn-secondary btn-sm w-full"
-                >
-                  + Subtask
-                </button>
-              </form>
+                  <input type="hidden" name="conversation_id" value={convId} />
+                  <input type="hidden" name="parent_task_id" value={t.id} />
+                  <input
+                    name="title"
+                    required
+                    maxLength={200}
+                    placeholder="Subtask title…"
+                    className="input text-[12px] py-1"
+                  />
+                  <select
+                    name="assigned_to_agent_id"
+                    className="input text-[12px] py-1"
+                    defaultValue=""
+                  >
+                    <option value="">(unassigned)</option>
+                    {members.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.avatar_emoji} {m.display_name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="submit"
+                    className="btn btn-secondary btn-sm w-full"
+                  >
+                    + Subtask
+                  </button>
+                </form>
+
+                <details className="text-[12px] mt-3">
+                  <summary className="cursor-pointer text-[color:var(--color-ink-soft)] select-none">
+                    🔱 Fan out to multiple assignees…
+                  </summary>
+                  <form action={splitTaskAction} className="space-y-1.5 mt-2">
+                    <input type="hidden" name="conversation_id" value={convId} />
+                    <input type="hidden" name="parent_task_id" value={t.id} />
+                    <textarea
+                      name="titles"
+                      rows={3}
+                      placeholder={`One title per line\nResearch market\nResearch competitors\nResearch tech`}
+                      className="input text-[12px] font-mono"
+                      required
+                    />
+                    <div className="text-[10px] text-[color:var(--color-ink-soft)]">
+                      Pick assignees in order; the first listed assignee gets
+                      the first line, etc. Extra titles reuse the last assignee.
+                    </div>
+                    {members.map((m, i) => (
+                      <select
+                        key={m.id + i}
+                        name="assignees"
+                        defaultValue=""
+                        className="input text-[12px] py-1"
+                      >
+                        <option value="">(slot {i + 1}: unassigned)</option>
+                        {members.map((mm) => (
+                          <option key={mm.id} value={mm.id}>
+                            {mm.avatar_emoji} {mm.display_name}
+                          </option>
+                        ))}
+                      </select>
+                    ))}
+                    <button
+                      type="submit"
+                      className="btn btn-primary btn-sm w-full"
+                    >
+                      Split
+                    </button>
+                  </form>
+                </details>
+              </>
             ) : null}
           </div>
         </aside>
