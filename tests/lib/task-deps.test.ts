@@ -282,6 +282,27 @@ describe("subtask 派生", () => {
       /owner or assignee/,
     );
   });
+
+  it("assignee can spawn subtask and parent IS auto-blocked (audit fix)", () => {
+    const owner = seedAgent("usr_o", "owner");
+    const assignee = seedAgent("usr_a", "assignee");
+    const parent = createTask({
+      title: "p",
+      owner_agent_id: owner.id,
+      assigned_to_agent_id: assignee.id,
+    });
+    const child = createSubtask({
+      parent_task_id: parent.id,
+      title: "c",
+      owner_agent_id: assignee.id, // assignee, not owner
+    });
+    const blockers = listBlocking(child.id).map((d) => d.blocked_task_id);
+    assert.deepEqual(
+      blockers,
+      [parent.id],
+      "parent must be blocked by child even when subtask spawned by assignee",
+    );
+  });
 });
 
 describe("listBlockers / listBlocking", () => {

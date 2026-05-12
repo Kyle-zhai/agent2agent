@@ -218,12 +218,25 @@ export function reportToolResult(input: ReportInput): {
   }
   const now = Date.now();
   if (input.ok) {
-    db()
+    const info = db()
       .prepare(
         `UPDATE tool_call_requests SET status = 'completed', result_json = ?,
                                        finished_at = ? WHERE id = ? AND status = 'pending'`,
       )
       .run(JSON.stringify(input.result ?? null), now, input.rpc_id);
+    // Race: timeout / cancel could have moved the row out of 'pending'
+    // between our SELECT above and this UPDATE. info.changes === 0 means
+    // we're too late — surface the actual final status without writing a
+    // false rpc.completed audit and without resolving any (already-gone)
+    // pending Promise.
+    if (info.changes === 0) {
+      const cur = (
+        db()
+          .prepare("SELECT status FROM tool_call_requests WHERE id = ?")
+          .get(input.rpc_id) as { status: RpcCallStatus } | undefined
+      )?.status ?? "pending";
+      return { ok: false, status: cur };
+    }
     logAudit("rpc.completed", {
       agentId: input.reporter_agent_id,
       detail: { rpc_id: input.rpc_id, caller: row.caller_agent_id },
@@ -245,12 +258,20 @@ export function reportToolResult(input: ReportInput): {
     }
     return { ok: true, status: "completed" };
   }
-  db()
+  const info = db()
     .prepare(
       `UPDATE tool_call_requests SET status = 'failed', error = ?,
                                      finished_at = ? WHERE id = ? AND status = 'pending'`,
     )
     .run((input.error ?? "agent error").slice(0, 4000), now, input.rpc_id);
+  if (info.changes === 0) {
+    const cur = (
+      db()
+        .prepare("SELECT status FROM tool_call_requests WHERE id = ?")
+        .get(input.rpc_id) as { status: RpcCallStatus } | undefined
+    )?.status ?? "pending";
+    return { ok: false, status: cur };
+  }
   logAudit("rpc.failed", {
     agentId: input.reporter_agent_id,
     detail: { rpc_id: input.rpc_id, err: input.error },

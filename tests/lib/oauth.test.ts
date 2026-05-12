@@ -85,6 +85,17 @@ describe("state signing", () => {
     const r = verifyState(s, "secret-b");
     assert.equal(r.ok, false);
   });
+
+  it("rejects state with mac length mismatch (defense before timingSafeEqual)", () => {
+    const s = signState("abc", "secret", { mode: "signin" });
+    const parts = s.split(".");
+    // Truncate the MAC → verifyState must reject without crashing.
+    const truncated = parts[0] + "." + parts[1] + "." + parts[2].slice(0, 10);
+    const r = verifyState(truncated, "secret");
+    assert.equal(r.ok, false);
+    if (r.ok) return;
+    assert.equal(r.error, "bad_state_mac");
+  });
 });
 
 describe("handleCallbackProfile — signup path", () => {

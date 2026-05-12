@@ -560,27 +560,39 @@ export async function transitionTaskStatus(input: TransitionInput): Promise<{
   }
 
   const now = Date.now();
-  db()
-    .prepare(
-      `UPDATE tasks
-       SET status = ?, result_snapshot_id = ?, updated_at = ?
-       WHERE id = ?`,
-    )
-    .run(finalStatus, resultSnap, now, t.id);
+  // All of these writes belong to a single logical state transition. Bundle
+  // them so any one throwing (e.g., comment validator) rolls back the UPDATE.
+  // We can't include the async auto-reviewer dispatch inside the tx because
+  // better-sqlite3 transactions are sync — fire it AFTER the tx commits.
+  const tx = db().transaction(() => {
+    db()
+      .prepare(
+        `UPDATE tasks
+         SET status = ?, result_snapshot_id = ?, updated_at = ?
+         WHERE id = ?`,
+      )
+      .run(finalStatus, resultSnap, now, t.id);
 
-  appendEvent(t.id, input.actor_agent_id, "status_change", {
-    from: t.status,
-    to: finalStatus,
-    requested: input.to_status,
-    result_snapshot_id: resultSnap,
+    appendEvent(t.id, input.actor_agent_id, "status_change", {
+      from: t.status,
+      to: finalStatus,
+      requested: input.to_status,
+      result_snapshot_id: resultSnap,
+    });
+    if (input.comment && input.comment.trim()) {
+      addTaskComment(t.id, input.actor_agent_id, input.comment);
+    }
+    if (input.to_status === "awaiting_review" && finalStatus === "awaiting_review") {
+      appendEvent(t.id, input.actor_agent_id, "review_requested", {});
+    }
+    if (criteriaFailures) {
+      appendEvent(t.id, null, "criteria_failed", { failures: criteriaFailures });
+    }
   });
-  if (input.comment && input.comment.trim()) {
-    addTaskComment(t.id, input.actor_agent_id, input.comment);
-  }
+  tx();
+
+  // Side-effects after the durable state is committed.
   if (input.to_status === "awaiting_review" && finalStatus === "awaiting_review") {
-    appendEvent(t.id, input.actor_agent_id, "review_requested", {});
-    // v0.11: kick off auto-review for any eligible managed reviewers.
-    // Lazy require avoids the auto-reviewer → tasks circular import.
     try {
       const mod = await import("./auto-reviewer");
       mod.maybeTriggerAutoReview(getTask(t.id)!);
@@ -590,9 +602,6 @@ export async function transitionTaskStatus(input: TransitionInput): Promise<{
         err: err instanceof Error ? err.message : String(err),
       });
     }
-  }
-  if (criteriaFailures) {
-    appendEvent(t.id, null, "criteria_failed", { failures: criteriaFailures });
   }
   logAudit("task.status_change", {
     agentId: input.actor_agent_id,
@@ -814,19 +823,22 @@ export async function requestChanges(
     // changes. We do the state transition directly here (no recursive authz)
     // and record events. Caller is expected to have already validated the
     // reviewer is in the conversation / has task.review capability.
-    db()
-      .prepare(
-        `UPDATE tasks SET status = 'changes_requested', updated_at = ? WHERE id = ?`,
-      )
-      .run(Date.now(), t.id);
-    appendEvent(t.id, actorAgentId, "status_change", {
-      from: t.status,
-      to: "changes_requested",
-      requested: "changes_requested",
+    const tx = db().transaction(() => {
+      db()
+        .prepare(
+          `UPDATE tasks SET status = 'changes_requested', updated_at = ? WHERE id = ?`,
+        )
+        .run(Date.now(), t.id);
+      appendEvent(t.id, actorAgentId, "status_change", {
+        from: t.status,
+        to: "changes_requested",
+        requested: "changes_requested",
+      });
+      if (comment.trim()) {
+        addTaskComment(t.id, actorAgentId, comment);
+      }
     });
-    if (comment.trim()) {
-      addTaskComment(t.id, actorAgentId, comment);
-    }
+    tx();
     if (t.conversation_id) {
       recordConversationEvent(t.conversation_id, "task.status_changed", t.id);
     }
@@ -1111,22 +1123,17 @@ export function createSubtask(input: {
     success_criteria: input.success_criteria,
   });
   // Auto-add as blocker on parent: parent can't be done until child is done.
-  try {
-    addTaskDependency({
-      blocker_task_id: child.id,
-      blocked_task_id: parent.id,
-      actor_agent_id: parent.owner_agent_id,
-    });
-  } catch (err) {
-    // If the owner is different (subtask created by assignee), the dep
-    // can't be added as-actor; we still allow the subtask. Surface the
-    // detail in audit, not as a user-facing error.
-    console.warn("subtask auto-dep skipped", {
-      child: child.id,
-      parent: parent.id,
-      err: err instanceof Error ? err.message : String(err),
-    });
-  }
+  // We use the parent.owner_agent_id as the actor because the
+  // owner-only authz on addTaskDependency reflects "who can shape the
+  // parent's incoming graph" — when an assignee spawns a subtask, the
+  // dependency is implied by the parent-child relationship itself, not
+  // a separate assertion by the assignee. The structural constraint
+  // (parent waits on child) is design intent, not a discretionary choice.
+  addTaskDependency({
+    blocker_task_id: child.id,
+    blocked_task_id: parent.id,
+    actor_agent_id: parent.owner_agent_id,
+  });
   logAudit("task.subtask_created", {
     agentId: input.owner_agent_id,
     detail: { parent: parent.id, child: child.id },

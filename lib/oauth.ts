@@ -1,5 +1,5 @@
 import "server-only";
-import { randomBytes, createHash } from "node:crypto";
+import { randomBytes, createHash, timingSafeEqual } from "node:crypto";
 import { db } from "./db";
 import { newOAuthIdentityId, newUserId } from "./ids";
 import { logAudit } from "./audit";
@@ -424,7 +424,21 @@ export function verifyState(
     .update(`${nonce}.${intentB64}.${secret}`)
     .digest("hex")
     .slice(0, 32);
-  if (expected !== mac) return { ok: false, error: "bad_state_mac" };
+  // Constant-time compare — `!==` would leak the prefix match length and
+  // (combined with retries) let an attacker forge a state. timingSafeEqual
+  // throws if lengths differ, so guard that first; mismatched length itself
+  // is the structural error case caught upstream.
+  if (mac.length !== expected.length) {
+    return { ok: false, error: "bad_state_mac" };
+  }
+  if (
+    !timingSafeEqual(
+      Buffer.from(expected, "utf8"),
+      Buffer.from(mac, "utf8"),
+    )
+  ) {
+    return { ok: false, error: "bad_state_mac" };
+  }
   let intent: OAuthIntent;
   try {
     intent = JSON.parse(Buffer.from(intentB64, "base64url").toString("utf8"));

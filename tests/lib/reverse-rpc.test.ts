@@ -211,6 +211,51 @@ describe("dispatchToolCall round-trip", () => {
   });
 });
 
+describe("race: reportToolResult after timeout", () => {
+  it("returns ok:false with the actual final status instead of falsely auditing completed", async () => {
+    const caller = seedAgent("usr_c", "caller");
+    const host = seedAgent("usr_h", "host");
+    befriend(caller.id, host.id);
+    setAgentCapabilities(host.id, "usr_h", [
+      { name: "mcp.host", tools: ["fs.read"] },
+    ]);
+    const promise = dispatchToolCall({
+      caller_agent_id: caller.id,
+      tool_name: "fs.read",
+      args: {},
+      timeout_ms: 1000,
+    });
+    // Wait long enough for timeout to fire
+    await new Promise((r) => setTimeout(r, 1100));
+    const res = await promise;
+    assert.equal(res.ok, false);
+    if (res.ok) return;
+    assert.equal(res.status, "timeout");
+    // Now host tries to report success — should be rejected because
+    // status is already 'timeout', not 'pending'.
+    const rpcRow = db()
+      .prepare(
+        "SELECT id FROM tool_call_requests WHERE target_agent_id = ? ORDER BY created_at DESC LIMIT 1",
+      )
+      .get(host.id) as { id: string };
+    const report = reportToolResult({
+      rpc_id: rpcRow.id,
+      reporter_agent_id: host.id,
+      ok: true,
+      result: { late: true },
+    });
+    assert.equal(report.ok, false);
+    assert.equal(report.status, "timeout");
+    // Audit should NOT contain a spurious rpc.completed for this rpc.
+    const completedEntries = db()
+      .prepare(
+        "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'rpc.completed' AND detail_json LIKE ?",
+      )
+      .get(`%${rpcRow.id}%`) as { n: number };
+    assert.equal(completedEntries.n, 0);
+  });
+});
+
 describe("cancelCall", () => {
   it("caller can cancel; resolves with cancelled status", async () => {
     const caller = seedAgent("usr_c", "caller");

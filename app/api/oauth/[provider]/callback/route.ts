@@ -13,20 +13,17 @@ export const dynamic = "force-dynamic";
 
 const STATE_COOKIE = "a2a_oauth_state";
 
-export async function GET(
+async function handleCallback(
   req: Request,
-  { params }: { params: Promise<{ provider: string }> },
+  providerId: string,
+  code: string | null,
+  stateRaw: string | null,
+  errorParam: string | null,
 ): Promise<Response> {
-  const { provider: providerId } = await params;
   const provider = getProvider(providerId);
   if (!provider || !isProviderConfigured(providerId)) {
     return new Response("Provider not configured.", { status: 404 });
   }
-  const url = new URL(req.url);
-  const code = url.searchParams.get("code");
-  const stateRaw = url.searchParams.get("state");
-  const errorParam = url.searchParams.get("error");
-
   if (errorParam) {
     logAudit("auth.oauth_callback_fail", {
       detail: { provider: providerId, error: errorParam },
@@ -45,7 +42,6 @@ export async function GET(
     });
     redirect(`/sign-in?error=${encodeURIComponent(verified.error)}`);
   }
-  // Cross-check the nonce cookie. If absent or mismatched, treat as CSRF.
   const jar = await cookies();
   const nonceCookie = jar.get(STATE_COOKIE)?.value;
   if (!nonceCookie || nonceCookie !== verified.nonce) {
@@ -56,7 +52,6 @@ export async function GET(
   }
   jar.delete(STATE_COOKIE);
 
-  // Exchange code → token → profile.
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? new URL(req.url).origin;
   const redirectUri = `${baseUrl}/api/oauth/${provider.id}/callback`;
   const clientId = process.env[provider.client_id_env]!;
@@ -104,4 +99,43 @@ export async function GET(
     );
   }
   redirect(redirectTo);
+}
+
+export async function GET(
+  req: Request,
+  { params }: { params: Promise<{ provider: string }> },
+): Promise<Response> {
+  const { provider } = await params;
+  const url = new URL(req.url);
+  return handleCallback(
+    req,
+    provider,
+    url.searchParams.get("code"),
+    url.searchParams.get("state"),
+    url.searchParams.get("error"),
+  );
+}
+
+// Apple's response_mode=form_post sends the callback as a POST form. We
+// accept it on the same route so the rest of the provider abstraction
+// doesn't have to branch on transport. content-type is x-www-form-urlencoded.
+export async function POST(
+  req: Request,
+  { params }: { params: Promise<{ provider: string }> },
+): Promise<Response> {
+  const { provider } = await params;
+  const ct = req.headers.get("content-type") ?? "";
+  if (!ct.includes("application/x-www-form-urlencoded")) {
+    return new Response("Unsupported content-type for OAuth callback POST.", {
+      status: 415,
+    });
+  }
+  const form = await req.formData();
+  return handleCallback(
+    req,
+    provider,
+    typeof form.get("code") === "string" ? (form.get("code") as string) : null,
+    typeof form.get("state") === "string" ? (form.get("state") as string) : null,
+    typeof form.get("error") === "string" ? (form.get("error") as string) : null,
+  );
 }
