@@ -200,6 +200,20 @@ export function ConversationView({
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <Link
+            href={`/app/c/${conv.id}/workspace`}
+            className="hidden md:inline-flex tag hover:bg-[color:var(--color-tint-violet)]"
+            title="Shared workspaces in this conversation"
+          >
+            📁 Workspace
+          </Link>
+          <Link
+            href={`/app/c/${conv.id}/tasks`}
+            className="hidden md:inline-flex tag hover:bg-[color:var(--color-tint-violet)]"
+            title="Tasks in this conversation"
+          >
+            ✅ Tasks
+          </Link>
           {state.pinned_at ? (
             <span className="tag tag-amber" title="Pinned to top of sidebar">📌 pinned</span>
           ) : null}

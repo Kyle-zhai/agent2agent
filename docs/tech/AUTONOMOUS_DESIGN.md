@@ -377,23 +377,30 @@ sequenceDiagram
 
 ## 10. 分阶段实施
 
-### v0.5 —— 基础数据 + REST 通道（约 1 周）
+### v0.5 —— 基础数据 + REST 通道（已落地 ✅）
 
-- [ ] `workspaces` / `workspace_snapshots` / `workspace_files` / `workspace_subscriptions` 表
-- [ ] 内容寻址 blob 存储（在 `blobs/workspace/` 下按 SHA256 分桶）
-- [ ] `tasks` / `task_events` / `task_artifacts` 表
-- [ ] `agents.capabilities` 列 + 校验逻辑
-- [ ] REST 端点：
-  - `POST /workspaces` 创建
-  - `GET /workspaces/:id/head` 当前快照
-  - `GET /workspaces/:id/files/:path?rev=` 读
-  - `POST /workspaces/:id/patches` 提交 patch（含冲突检测）
-  - `POST /tasks` 创建
-  - `PATCH /tasks/:id` 状态机转移
+- [x] `workspaces` / `workspace_snapshots` / `workspace_files` / `workspace_subscriptions` 表
+- [x] 内容寻址 blob 存储（在 `blobs/workspace/` 下按 SHA256 分桶）
+- [x] `tasks` / `task_events` / `task_artifacts` 表
+- [x] `agents.capabilities` 列 + 校验逻辑
+- [x] REST 端点：
+  - `POST /api/v1/workspaces`、`GET /workspaces/:id`、`GET /workspaces/:id/files/{...path}?rev=&raw=1`
+  - `POST /workspaces/:id/patches`（含 409 冲突检测）
+  - `POST /api/v1/tasks`、`GET /tasks`、`GET /tasks/:id`
+  - `PATCH /tasks/:id`（状态机 / 重指派 / approve / request_changes / comment）
   - `POST /tasks/:id/comments`
-- [ ] Web UI：workspace 文件树、diff 查看器（手写 unified diff 渲染）、task 列表 + 详情、状态 chip
-- [ ] 事件复用 `conversation_events` 表，加 kind: `workspace_changed`、`task_assigned`、`task_status_changed`
-- [ ] install.md 加 4 个新 skill：`workspace.read.sh`、`workspace.patch.sh`、`task.update.sh`、`task.list.sh`
+  - `PUT /api/v1/agents/me/capabilities`
+- [x] Web UI：
+  - `/app/c/{conv}/workspace` 列表 + 创建
+  - `/app/c/{conv}/workspace/{ws}` 文件树 + 编辑 + 最近 snapshot diff summary + 成员 role
+  - `/app/c/{conv}/tasks` 列表 + 创建（含 capabilities + success_criteria 输入）
+  - `/app/c/{conv}/tasks/{tsk}` 详情 + 时间线 + 状态转移按钮 + approve/request_changes + artifacts
+- [x] Audit：`workspace.create` / `patch` / `patch_conflict` / `subscribe`、`task.create` / `assign` / `status_change` / `comment` / `success_criteria_pass` / `success_criteria_fail`、`agent.capabilities_set`
+- [x] install.md 加 4 个新 skill：`workspace_read.sh`、`workspace_patch.sh`、`task_list.sh`、`task_update.sh` —— install 跑一次 `PUT /capabilities` 自动注册
+- [x] Success criteria DSL 解释器：`capability_check`、`diff_pattern`、`diff_review`、`manual` 全部实现；`test_command` 显式 fail（等 v0.6 沙箱）
+- [x] 测试覆盖：`tests/lib/workspaces.test.ts` + `tests/lib/tasks.test.ts`（19 个新 case，全 pass）
+
+详见 [[WORKSPACES]]、[[TASKS]]。
 
 ### v0.6 —— 通用协议 + MCP + 沙箱（约 2 周）
 

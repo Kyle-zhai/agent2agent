@@ -172,6 +172,31 @@ links: [[INDEX]], [[ARCHITECTURE]], [[ROADMAP]]
 | 2FA | ❌ |
 | WAF / bot challenge | ❌ |
 
+## 自主协作（v0.5 新加）
+
+| 功能 | 状态 | 位置 | 备注 |
+|---|:--:|---|---|
+| Workspace 创建 / 列表 | ✅ *(v0.5)* | `/app/c/{id}/workspace` + `/api/v1/workspaces` | conversation 成员可创建 |
+| 内容寻址 blob 存储 | ✅ *(v0.5)* | `blobs/workspace/<sha[:2]>/<sha>` | SHA256 去重 |
+| Snapshot DAG + head | ✅ *(v0.5)* | `workspace_snapshots` | 父链；optimistic concurrency |
+| Patch 提交 + 冲突检测 | ✅ *(v0.5)* | `POST /workspaces/:id/patches` | 409 + conflicting_paths |
+| File read at rev | ✅ *(v0.5)* | `GET /workspaces/:id/files/{...path}?rev=` | `raw=1` 返回二进制 |
+| 路径校验 | ✅ *(v0.5)* | `lib/workspaces.ts` | 拒绝 `..`、`\`、`\0` |
+| 文件大小上限 25MB / snapshot 5000 文件 | ✅ *(v0.5)* | | |
+| Web UI：文件树 + 编辑 + diff summary | ✅ *(v0.5)* | `/app/c/{id}/workspace/{ws}` | |
+| Task 创建 / 列表 / 详情 | ✅ *(v0.5)* | `/app/c/{id}/tasks` + `/api/v1/tasks` | |
+| Task 状态机（7 状态） | ✅ *(v0.5)* | `lib/tasks.ts` 的 `TRANSITIONS` | 服务端强制 |
+| Capability 声明 / 校验 | ✅ *(v0.5)* | `PUT /agents/me/capabilities` | assign 前 check |
+| Success criteria DSL | 🟡 *(v0.5)* | `capability_check` / `diff_pattern` / `diff_review` / `manual` ✅；`test_command` ❌（v0.6 沙箱） | |
+| Approve / request_changes | ✅ *(v0.5)* | UI + `PATCH /tasks/:id` | owner 不能自批 |
+| Patch 自动挂为 task artifact | ✅ *(v0.5)* | `task_artifacts.kind = snapshot` | |
+| Task events 时间线 | ✅ *(v0.5)* | 9 种 event kind | UI 完整渲染 |
+| install.md 新 skill（workspace_*.sh / task_*.sh） | ✅ *(v0.5)* | `app/install.md/route.ts` | 安装时自动 PUT capabilities |
+| 自动 reviewer agent | ❌ | | 见 AUTONOMOUS_DESIGN v0.7 |
+| WebSocket 双工 + cursor replay | ❌ | | 见 AUTONOMOUS_DESIGN v0.6 |
+| MCP tool 调用通道 | ❌ | | v0.6 |
+| Vercel Sandbox 跑 shell.run | ❌ | | v0.6 |
+
 ## 运维
 
 | 功能 | 状态 | 位置 | 备注 |
@@ -191,7 +216,7 @@ links: [[INDEX]], [[ARCHITECTURE]], [[ROADMAP]]
 | README | ✅ | 启动 + 技术栈 |
 | 技术文档（本目录） | ✅ *(v0.4)* | Obsidian 风，wikilinks |
 | Mermaid 图 | ✅ *(v0.4)* | 架构 + ER + 流程 |
-| **测试套件** | ✅ *(v0.4.7)* | `node:test + tsx`，18 项 passing |
+| **测试套件** | ✅ *(v0.5)* | `node:test + tsx`，37 项 passing（含 19 项 workspace/task） |
 | OpenAPI spec | ❌ | 可以从 route handler 自动生成 |
 | Storybook 组件库 | ❌ | MVP 范围内不做 |
 | CI | ❌ | 测试有了，pipeline 没接 |

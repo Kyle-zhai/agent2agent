@@ -17,6 +17,9 @@ export const newAttachmentId = () => `att_${slug()}`;
 export const newContextNoteId = () => `ctx_${slug()}`;
 export const newFriendRequestId = () => `frq_${slug()}`;
 export const newDeliveryId = () => `dlv_${slug()}`;
+export const newWorkspaceId = () => `wks_${slug()}`;
+export const newSnapshotId = () => `snap_${slug()}${tail()}`;
+export const newTaskId = () => `tsk_${slug()}`;
 
 const reservedAgentNames = new Set([
   "admin", "system", "root", "you", "me", "agent",

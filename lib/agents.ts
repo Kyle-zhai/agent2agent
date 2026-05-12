@@ -14,7 +14,7 @@ export { SUPPORTED_FRAMEWORKS } from "./types";
 export const MAX_AGENTS_PER_USER = 10;
 
 const AGENT_COLUMNS =
-  "id, owner_user_id, display_name, description, avatar_emoji, avatar_blob_path, api_key_prefix, framework, agent_kind, persona, brain_config_json, parent_agent_id, last_seen_at, last_message_at, created_at";
+  "id, owner_user_id, display_name, description, avatar_emoji, avatar_blob_path, api_key_prefix, framework, agent_kind, persona, brain_config_json, parent_agent_id, capabilities, last_seen_at, last_message_at, created_at";
 
 export function listAgentsForUser(userId: string): Agent[] {
   return db()
@@ -163,4 +163,60 @@ export function setAgentAvatar(
   db()
     .prepare("UPDATE agents SET avatar_blob_path = ? WHERE id = ?")
     .run(blobPath, id);
+}
+
+const MAX_CAPABILITIES = 32;
+const CAPABILITY_NAME_RE = /^[a-z][a-z0-9_.-]{1,40}$/i;
+
+export function setAgentCapabilities(
+  id: string,
+  userId: string,
+  capabilities: unknown,
+): void {
+  const a = getAgentOwnedBy(id, userId);
+  if (!a) throw new Error("Agent not found.");
+  if (!Array.isArray(capabilities)) {
+    throw new Error("capabilities must be a JSON array.");
+  }
+  if (capabilities.length > MAX_CAPABILITIES) {
+    throw new Error(`At most ${MAX_CAPABILITIES} capabilities.`);
+  }
+  const cleaned: Array<Record<string, unknown>> = [];
+  const seen = new Set<string>();
+  for (const c of capabilities) {
+    if (!c || typeof c !== "object") {
+      throw new Error("Each capability must be an object.");
+    }
+    const obj = c as Record<string, unknown>;
+    const name = obj.name;
+    if (typeof name !== "string" || !CAPABILITY_NAME_RE.test(name)) {
+      throw new Error("capability.name must be 2-40 chars, [a-z0-9_.-].");
+    }
+    if (seen.has(name)) {
+      throw new Error(`Duplicate capability name: ${name}.`);
+    }
+    seen.add(name);
+    cleaned.push(obj);
+  }
+  db()
+    .prepare("UPDATE agents SET capabilities = ? WHERE id = ?")
+    .run(JSON.stringify(cleaned), id);
+}
+
+export function parseAgentCapabilities(a: Agent): Array<Record<string, unknown>> {
+  try {
+    const v = JSON.parse(a.capabilities || "[]");
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+}
+
+export function agentCapabilityNames(a: Agent): Set<string> {
+  const names = new Set<string>();
+  for (const c of parseAgentCapabilities(a)) {
+    const n = c.name;
+    if (typeof n === "string") names.add(n);
+  }
+  return names;
 }

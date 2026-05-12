@@ -33,6 +33,7 @@ export type Agent = {
   persona: string;
   brain_config_json: string;
   parent_agent_id: string | null;
+  capabilities: string;
   last_seen_at: number | null;
   last_message_at: number | null;
   created_at: number;
@@ -135,4 +136,127 @@ export type FriendRequest = {
   status: "pending" | "accepted" | "rejected";
   created_at: number;
   responded_at: number | null;
+};
+
+// v0.5 — autonomous-collab types ----------------------------------------------
+
+export type Capability = {
+  name: string;
+  version?: string;
+  [key: string]: unknown;
+};
+
+export type WorkspaceSubscriptionRole = "reader" | "writer" | "admin";
+
+export type Workspace = {
+  id: string;
+  conversation_id: string | null;
+  name: string;
+  head_snapshot_id: string | null;
+  created_by_agent_id: string | null;
+  created_at: number;
+};
+
+export type WorkspaceSnapshot = {
+  id: string;
+  workspace_id: string;
+  parent_snapshot_id: string | null;
+  created_by_agent_id: string | null;
+  commit_message: string;
+  thinking: string;
+  task_id: string | null;
+  created_at: number;
+};
+
+export type WorkspaceFile = {
+  snapshot_id: string;
+  path: string;
+  content_sha256: string;
+  size_bytes: number;
+};
+
+export type WorkspaceSubscription = {
+  workspace_id: string;
+  agent_id: string;
+  role: WorkspaceSubscriptionRole;
+  created_at: number;
+};
+
+export type TaskStatus =
+  | "open"
+  | "assigned"
+  | "in_progress"
+  | "awaiting_review"
+  | "changes_requested"
+  | "done"
+  | "cancelled";
+
+export const TASK_STATUSES: readonly TaskStatus[] = [
+  "open",
+  "assigned",
+  "in_progress",
+  "awaiting_review",
+  "changes_requested",
+  "done",
+  "cancelled",
+] as const;
+
+export type SuccessCriterion =
+  | { type: "test_command"; shell?: string; cmd: string; sandbox?: string }
+  | { type: "diff_review"; min_approvers: number; approver_capability?: string }
+  | { type: "diff_pattern"; forbidden?: string[]; required?: string[] }
+  | { type: "capability_check"; must_include: string[] }
+  | { type: "manual"; approver_agent_id: string };
+
+export type Task = {
+  id: string;
+  conversation_id: string | null;
+  workspace_id: string | null;
+  parent_task_id: string | null;
+  title: string;
+  description: string;
+  owner_agent_id: string;
+  assigned_to_agent_id: string | null;
+  status: TaskStatus;
+  required_capabilities: string;
+  success_criteria: string;
+  result_snapshot_id: string | null;
+  created_at: number;
+  updated_at: number;
+};
+
+export type TaskEventKind =
+  | "created"
+  | "assigned"
+  | "unassigned"
+  | "status_change"
+  | "comment"
+  | "patch_attached"
+  | "review_requested"
+  | "approved"
+  | "changes_requested"
+  | "criteria_failed";
+
+export type TaskEvent = {
+  id: number;
+  task_id: string;
+  actor_agent_id: string | null;
+  kind: TaskEventKind;
+  payload_json: string;
+  created_at: number;
+};
+
+export type TaskArtifactKind =
+  | "snapshot"
+  | "attachment"
+  | "context_note"
+  | "message"
+  | "tool_result";
+
+export type TaskArtifact = {
+  task_id: string;
+  kind: TaskArtifactKind;
+  ref_id: string;
+  added_by_agent_id: string | null;
+  added_at: number;
 };

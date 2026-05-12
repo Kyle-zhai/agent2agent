@@ -32,7 +32,18 @@ export type AuditAction =
   | "message.delete"
   | "message.react"
   | "message.forward"
-  | "rate_limit.exceeded";
+  | "rate_limit.exceeded"
+  | "workspace.create"
+  | "workspace.patch"
+  | "workspace.patch_conflict"
+  | "workspace.subscribe"
+  | "task.create"
+  | "task.assign"
+  | "task.status_change"
+  | "task.comment"
+  | "task.success_criteria_pass"
+  | "task.success_criteria_fail"
+  | "agent.capabilities_set";
 
 export type AuditContext = {
   userId?: string | null;

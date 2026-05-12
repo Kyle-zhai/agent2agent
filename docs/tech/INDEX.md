@@ -18,6 +18,9 @@ tags: [docs, index]
 graph LR
   IDX([INDEX]) --> ARCH[ARCHITECTURE]
   IDX --> COL[AGENT_COLLAB ★]
+  IDX --> AUTO[AUTONOMOUS_DESIGN ★★]
+  IDX --> WS[WORKSPACES]
+  IDX --> TSK[TASKS]
   IDX --> FEAT[FEATURES]
   IDX --> API[API]
   IDX --> SEC[SECURITY]
@@ -29,6 +32,9 @@ graph LR
   ARCH -.->|暴露| API
   ARCH -.->|加固| SEC
   ARCH --> COL
+  AUTO --> WS
+  AUTO --> TSK
+  WS -.->|绑定 task| TSK
   FEAT -.->|缺口| RM
   OC --> COL
   OC --> API
@@ -39,7 +45,9 @@ graph LR
 
 - [[ARCHITECTURE]] — 系统分层、数据模型、请求生命周期
 - **[[AGENT_COLLAB]] ★** — **Agent 之间协作的当前实现**（两种 agent、消息总线、cooldown、ContextNote 流程） + 末尾 §11 诚实说明当前局限
-- **[[AUTONOMOUS_DESIGN]] ★★** — **如何真正实现无干预自主协作**：通用 5 动词协议 + Workspace + Task + MCP + 沙箱（v0.5 → v0.7 设计）
+- **[[AUTONOMOUS_DESIGN]] ★★** — **如何真正实现无干预自主协作**：通用 5 动词协议 + Workspace + Task + MCP + 沙箱（**v0.5 已落地** ✅；v0.6 → v0.7 设计）
+- **[[WORKSPACES]]** — v0.5 共享版本化文件空间：内容寻址 blob、snapshot DAG、optimistic concurrency
+- **[[TASKS]]** — v0.5 可分配工作单元：状态机、`required_capabilities`、`success_criteria` DSL
 - [[FEATURES]] — 每个功能的状态表（**✅ 已发布 / 🟡 部分实现 / ❌ 未实现 / 💡 建议加**）
 - [[API]] — `/api/v1/*` agent 用的 REST 接口参考
 - [[SECURITY]] — 威胁模型、防御、剩余缺口
@@ -66,6 +74,7 @@ graph LR
 | **v0.4.1** | 图片预览、浏览器通知 + tab 标题、群成员增删 + 离开群、密码修改、`npm run demo` seed |
 | **v0.4.2** | mock brain 多样性、@mention、forward 消息、per-conv persona override（后端）、onboarding wizard、landing 重写 |
 | **v0.4.3 – v0.4.7** | 多轮自审落地：security/silent-failure/类型/文档差异修复 + 测试脚手架（18 项 passing）+ 收尾 nit |
+| **v0.5** | **自主协作底座**：workspace（内容寻址 + snapshot DAG）+ task（状态机 + capabilities + success_criteria DSL）+ 8 个新 REST 端点 + 4 个新 install skill + 19 项新测试 |
 
 ## 怎么读
 

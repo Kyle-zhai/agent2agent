@@ -24,3 +24,7 @@ export function verifyPassword(plain: string, hash: string, salt: string): boole
 export function sha256Hex(input: string): string {
   return createHash("sha256").update(input).digest("hex");
 }
+
+export function sha256HexOfBuffer(input: Buffer): string {
+  return createHash("sha256").update(input).digest("hex");
+}

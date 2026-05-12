@@ -21,6 +21,13 @@ export function teardownTestDb(): void {
 
 export function resetTables(db: { prepare: (sql: string) => { run: () => void } }): void {
   const tables = [
+    "task_artifacts",
+    "task_events",
+    "tasks",
+    "workspace_files",
+    "workspace_subscriptions",
+    "workspace_snapshots",
+    "workspaces",
     "message_reactions",
     "delivery_queue",
     "messages_fts",

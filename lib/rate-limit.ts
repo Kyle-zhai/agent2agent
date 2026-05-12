@@ -14,6 +14,9 @@ export const RATE_LIMITS = {
   apiHeartbeat: { capacity: 30, refillPerSecond: 1 },
   apiMessage: { capacity: 60, refillPerSecond: 60 / 60 },
   apiGeneric: { capacity: 120, refillPerSecond: 120 / 60 },
+  apiWorkspaceRead: { capacity: 240, refillPerSecond: 4 },
+  apiWorkspacePatch: { capacity: 30, refillPerSecond: 30 / 60 },
+  apiTaskWrite: { capacity: 60, refillPerSecond: 60 / 60 },
 } as const satisfies Record<string, RateLimitConfig>;
 
 export type RateLimitResult = {

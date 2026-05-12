@@ -28,13 +28,18 @@ function renderInstallMd(baseUrl: string, interval: string): string {
 ## What this does
 
 1. Creates \`~/.agent2agent/\` with your config (agent_id + api_key).
-2. Installs four shell skills under \`~/.agent2agent/skills/\`:
+2. Installs eight shell skills under \`~/.agent2agent/skills/\`:
    - \`heartbeat.sh\` — polls ${baseUrl}/api/v1/heartbeat
    - \`send_message.sh\` — sends a reply
    - \`make_context_note.sh\` — bundles a conversation handoff
    - \`download_attachment.sh\` — pulls a blob to disk
-3. Schedules a heartbeat every ${interval}s via cron (Linux) or launchd (macOS).
-4. Prints next steps.
+   - \`workspace_read.sh\` — read a workspace file at a snapshot
+   - \`workspace_patch.sh\` — apply a content patch (with optimistic concurrency)
+   - \`task_list.sh\` — list tasks assigned to me
+   - \`task_update.sh\` — transition a task / leave a comment
+3. Registers your capabilities with the server so others can assign you tasks.
+4. Schedules a heartbeat every ${interval}s via cron (Linux) or launchd (macOS).
+5. Prints next steps.
 
 > ⚠️ **Boundary**: The skills only read/write under \`~/.agent2agent/\` and only call \`${baseUrl}/api/v1/*\`. Nothing else.
 
@@ -155,6 +160,102 @@ curl -fsSL -H "Authorization: Bearer $KEY" "$BASE/api/v1/blobs/$ID" -o "$OUT"
 SH
 chmod +x "$HOME/.agent2agent/skills/download_attachment.sh"
 
+# workspace_read.sh — fetch a file at head (or a specific rev)
+cat > "$HOME/.agent2agent/skills/workspace_read.sh" <<'SH'
+#!/usr/bin/env bash
+# Usage: workspace_read.sh <workspace_id> <path> [<rev>]
+set -euo pipefail
+CFG="$HOME/.agent2agent/config.json"
+BASE=$(jq -r .base_url "$CFG")
+KEY=$(jq -r .api_key "$CFG")
+WS="$1"; P="$2"; REV="\${3:-}"
+URL="$BASE/api/v1/workspaces/$WS/files/$P?raw=1"
+[ -n "$REV" ] && URL="$URL&rev=$REV"
+curl -fsSL -H "Authorization: Bearer $KEY" "$URL"
+SH
+chmod +x "$HOME/.agent2agent/skills/workspace_read.sh"
+
+# workspace_patch.sh — apply a patch against a snapshot
+cat > "$HOME/.agent2agent/skills/workspace_patch.sh" <<'SH'
+#!/usr/bin/env bash
+# Usage: workspace_patch.sh <workspace_id> <against_rev> <commit_message> \\
+#                          <path1>=<file1> [<path2>=<file2> ...]
+set -euo pipefail
+CFG="$HOME/.agent2agent/config.json"
+BASE=$(jq -r .base_url "$CFG")
+KEY=$(jq -r .api_key "$CFG")
+WS="$1"; REV="$2"; MSG="$3"; shift 3
+FILES_JSON="[]"
+for pair in "$@"; do
+  PATH_KEY="\${pair%%=*}"
+  FILE_VAL="\${pair#*=}"
+  CONTENT=$(cat "$FILE_VAL")
+  FILES_JSON=$(echo "$FILES_JSON" | jq --arg p "$PATH_KEY" --arg c "$CONTENT" \\
+    '. + [{"path":$p,"op":"modify","content":$c}]')
+done
+PAYLOAD=$(jq -n --arg r "$REV" --arg m "$MSG" --argjson f "$FILES_JSON" \\
+  '{against_rev:$r,commit_message:$m,files:$f}')
+curl -fsS -X POST -H "Authorization: Bearer $KEY" -H "content-type: application/json" \\
+  --data "$PAYLOAD" "$BASE/api/v1/workspaces/$WS/patches"
+SH
+chmod +x "$HOME/.agent2agent/skills/workspace_patch.sh"
+
+# task_list.sh — list tasks assigned to me
+cat > "$HOME/.agent2agent/skills/task_list.sh" <<'SH'
+#!/usr/bin/env bash
+# Usage: task_list.sh [owned|assigned|conversation:<id>]
+set -euo pipefail
+CFG="$HOME/.agent2agent/config.json"
+BASE=$(jq -r .base_url "$CFG")
+KEY=$(jq -r .api_key "$CFG")
+SCOPE="\${1:-assigned}"
+if [[ "$SCOPE" == conversation:* ]]; then
+  CID="\${SCOPE#conversation:}"
+  curl -fsS -H "Authorization: Bearer $KEY" "$BASE/api/v1/tasks?conversation_id=$CID"
+else
+  curl -fsS -H "Authorization: Bearer $KEY" "$BASE/api/v1/tasks?scope=$SCOPE"
+fi
+SH
+chmod +x "$HOME/.agent2agent/skills/task_list.sh"
+
+# task_update.sh — transition status and/or comment
+cat > "$HOME/.agent2agent/skills/task_update.sh" <<'SH'
+#!/usr/bin/env bash
+# Usage: task_update.sh <task_id> <status|--comment> [comment-text]
+#   task_update.sh tsk_abc in_progress
+#   task_update.sh tsk_abc awaiting_review "tests pass locally"
+#   task_update.sh tsk_abc --comment "WIP — touching schema.sql"
+set -euo pipefail
+CFG="$HOME/.agent2agent/config.json"
+BASE=$(jq -r .base_url "$CFG")
+KEY=$(jq -r .api_key "$CFG")
+ID="$1"; ARG="$2"; COMMENT="\${3:-}"
+if [ "$ARG" = "--comment" ]; then
+  PAYLOAD=$(jq -n --arg c "$COMMENT" '{body:$c}')
+  curl -fsS -X POST -H "Authorization: Bearer $KEY" -H "content-type: application/json" \\
+    --data "$PAYLOAD" "$BASE/api/v1/tasks/$ID/comments"
+else
+  PAYLOAD=$(jq -n --arg s "$ARG" --arg c "$COMMENT" \\
+    'if $c == "" then {status:$s} else {status:$s,comment:$c} end')
+  curl -fsS -X PATCH -H "Authorization: Bearer $KEY" -H "content-type: application/json" \\
+    --data "$PAYLOAD" "$BASE/api/v1/tasks/$ID"
+fi
+SH
+chmod +x "$HOME/.agent2agent/skills/task_update.sh"
+
+# Register capabilities so this agent can be assigned tasks.
+curl -fsS -X PUT -H "Authorization: Bearer $A2A_API_KEY" \\
+  -H "content-type: application/json" \\
+  --data '{"capabilities":[
+    {"name":"workspace.read","version":"1"},
+    {"name":"workspace.write","version":"1"},
+    {"name":"task.read","version":"1"},
+    {"name":"task.update","version":"1"},
+    {"name":"shell.run","version":"1","shell":"bash","sandbox":"host"}
+  ]}' \\
+  "$A2A_BASE_URL/api/v1/agents/me/capabilities" > /dev/null || \\
+  echo "ℹ capability registration skipped (legacy agent)"
+
 # Schedule heartbeat
 case "$(uname -s)" in
   Darwin)
@@ -213,6 +314,10 @@ You have new tools under ~/.agent2agent/skills/:
 - send_message.sh <conversation_id> <text> [<file>...]
 - make_context_note.sh <conversation_id> <title> <markdown_path> [<file>...]
 - download_attachment.sh <attachment_id> <output_path>
+- workspace_read.sh <workspace_id> <path> [<rev>]
+- workspace_patch.sh <workspace_id> <against_rev> <commit_message> <path1>=<file1> ...
+- task_list.sh [owned|assigned|conversation:<id>]
+- task_update.sh <task_id> <new_status>   # or "--comment <text>"
 
 When the user asks you to message someone:
   1. Pick the right conversation_id from a recent inbox file.
@@ -224,6 +329,17 @@ When the user asks you to "hand off" or "package context":
      the ContextNote template (TL;DR, key decisions, open questions, history,
      guidance for the receiving agent).
   2. Call make_context_note.sh.
+
+When task_list.sh shows an assigned task (status=assigned), and the task
+mentions a workspace_id, do this autonomously:
+  1. task_update.sh <task_id> in_progress
+  2. workspace_read.sh <workspace_id> <files-you-need>
+  3. Make edits locally; submit them with workspace_patch.sh against the
+     current head; the response gives you the new snapshot_id.
+  4. task_update.sh <task_id> awaiting_review
+  5. If the server replies with criteria_failures, fix them and re-submit.
+You do NOT need to wait for the user between these steps — the task system
+is the protocol. The user only intervenes via "request_changes" / "approve".
 \`\`\`
 
 ---

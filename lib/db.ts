@@ -257,6 +257,94 @@ const SCHEMA_STATEMENTS: string[] = [
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (conversation_id, agent_id)
   )`,
+
+  // v0.5 autonomous-collab tables -----------------------------------------
+
+  `CREATE TABLE IF NOT EXISTS workspaces (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT REFERENCES conversations(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    head_snapshot_id TEXT,
+    created_by_agent_id TEXT REFERENCES agents(id),
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_workspaces_conv ON workspaces(conversation_id)`,
+
+  `CREATE TABLE IF NOT EXISTS workspace_snapshots (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    parent_snapshot_id TEXT REFERENCES workspace_snapshots(id),
+    created_by_agent_id TEXT REFERENCES agents(id),
+    commit_message TEXT NOT NULL DEFAULT '',
+    thinking TEXT NOT NULL DEFAULT '',
+    task_id TEXT,
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_ws_snap_ws
+    ON workspace_snapshots(workspace_id, created_at DESC)`,
+
+  `CREATE TABLE IF NOT EXISTS workspace_files (
+    snapshot_id TEXT NOT NULL REFERENCES workspace_snapshots(id) ON DELETE CASCADE,
+    path TEXT NOT NULL,
+    content_sha256 TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    PRIMARY KEY (snapshot_id, path)
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS workspace_subscriptions (
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    role TEXT NOT NULL CHECK (role IN ('reader','writer','admin')),
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (workspace_id, agent_id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_ws_subs_agent
+    ON workspace_subscriptions(agent_id)`,
+
+  `CREATE TABLE IF NOT EXISTS tasks (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT REFERENCES conversations(id) ON DELETE SET NULL,
+    workspace_id TEXT REFERENCES workspaces(id) ON DELETE SET NULL,
+    parent_task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    owner_agent_id TEXT NOT NULL REFERENCES agents(id),
+    assigned_to_agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+    status TEXT NOT NULL CHECK (status IN
+      ('open','assigned','in_progress','awaiting_review','changes_requested','done','cancelled')),
+    required_capabilities TEXT NOT NULL DEFAULT '[]',
+    success_criteria TEXT NOT NULL DEFAULT '[]',
+    result_snapshot_id TEXT REFERENCES workspace_snapshots(id),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_tasks_conv ON tasks(conversation_id, updated_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_tasks_assignee
+    ON tasks(assigned_to_agent_id, status, updated_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_tasks_owner
+    ON tasks(owner_agent_id, status, updated_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_tasks_workspace
+    ON tasks(workspace_id, status)`,
+
+  `CREATE TABLE IF NOT EXISTS task_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    actor_agent_id TEXT REFERENCES agents(id),
+    kind TEXT NOT NULL,
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_task_events_task
+    ON task_events(task_id, id)`,
+
+  `CREATE TABLE IF NOT EXISTS task_artifacts (
+    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    ref_id TEXT NOT NULL,
+    added_by_agent_id TEXT REFERENCES agents(id),
+    added_at INTEGER NOT NULL,
+    PRIMARY KEY (task_id, kind, ref_id)
+  )`,
 ];
 
 function ensureColumn(
@@ -288,4 +376,5 @@ export function migrate(d: Database.Database): void {
   ensureColumn(d, "messages", "reply_to_message_id", "reply_to_message_id TEXT");
   ensureColumn(d, "messages", "edited_at", "edited_at INTEGER");
   ensureColumn(d, "messages", "deleted_at", "deleted_at INTEGER");
+  ensureColumn(d, "agents", "capabilities", "capabilities TEXT NOT NULL DEFAULT '[]'");
 }
