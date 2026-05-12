@@ -59,7 +59,11 @@ export type AuditAction =
   | "invite.create"
   | "invite.redeem"
   | "invite.redeem_fail"
-  | "invite.revoke";
+  | "invite.revoke"
+  | "task.dep_add"
+  | "task.dep_remove"
+  | "task.subtask_created"
+  | "task.transition_blocked";
 
 export type AuditContext = {
   userId?: string | null;

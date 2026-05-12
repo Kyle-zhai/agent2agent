@@ -338,6 +338,20 @@ const SCHEMA_STATEMENTS: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_task_events_task
     ON task_events(task_id, id)`,
 
+  // v0.10 — task dependencies graph (blocker → blocked)
+  `CREATE TABLE IF NOT EXISTS task_dependencies (
+    blocker_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    blocked_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL,
+    created_by_agent_id TEXT REFERENCES agents(id),
+    PRIMARY KEY (blocker_task_id, blocked_task_id),
+    CHECK (blocker_task_id != blocked_task_id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_task_deps_blocked
+    ON task_dependencies(blocked_task_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_task_deps_blocker
+    ON task_dependencies(blocker_task_id)`,
+
   `CREATE TABLE IF NOT EXISTS task_artifacts (
     task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
     kind TEXT NOT NULL,

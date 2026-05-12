@@ -98,6 +98,7 @@ graph LR
 | **v0.7** | MCP 风格 tool calling：注册表 + per-agent capability 闸 + 5 内置工具（workspace.read/write/list、task.update_status、agent.send_message）；POST `/api/v1/tools/invoke`；`tool_invocations` 持久化 + audit |
 | **v0.8** | Vercel Sandbox 执行 `test_command` success criterion：本地 child_process 回退（dev/自托管）+ Vercel Sandbox 远端（生产，靠 `VERCEL_SANDBOX_TOKEN`）；`sandbox_runs` 表 + stdout/stderr 持久化（256KB 上限）；显式 skipped 状态 |
 | **v0.9** | **第三方 OAuth + 邀请链接**：Google/GitHub/Apple/WeChat/Instagram 5 provider 通用抽象；state MAC + httpOnly nonce 防 CSRF；linked accounts 多绑/解绑；base64url 132-bit 邀请码 + 自动 friendship；redeemer 限次/限时/拒重复 |
+| **v0.10** | **Task 依赖 + Subtask 派生**：`task_dependencies(blocker,blocked)` 表 + 环检测 + 自循环拒绝 + 20 blockers/task 上限；子 task 自动 block 父；2 新 tool（`task.create_subtask` / `task.add_dependency`）；UI 在 task 详情显示 parent/blockers/blocking/children 树 |
 
 ## 怎么读
 

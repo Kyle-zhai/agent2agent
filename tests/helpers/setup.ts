@@ -28,6 +28,7 @@ export function resetTables(db: { prepare: (sql: string) => { run: () => void } 
     "tool_invocations",
     "agent_sessions",
     "task_artifacts",
+    "task_dependencies",
     "task_events",
     "tasks",
     "workspace_files",

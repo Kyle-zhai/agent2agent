@@ -494,6 +494,28 @@ export async function transitionTaskStatus(input: TransitionInput): Promise<{
     throw new Error("Only owner or assignee can transition this task.");
   }
 
+  // v0.10: dependency gate — can't start work or close while blockers are open.
+  if (
+    input.to_status === "in_progress" ||
+    input.to_status === "awaiting_review" ||
+    input.to_status === "done"
+  ) {
+    const blockState = isTaskBlocked(t.id);
+    if (blockState.blocked) {
+      logAudit("task.transition_blocked", {
+        agentId: input.actor_agent_id,
+        detail: {
+          task_id: t.id,
+          to: input.to_status,
+          unmet_blockers: blockState.unmet_blockers,
+        },
+      });
+      throw new Error(
+        `Task is blocked by ${blockState.unmet_blockers.length} unfinished task(s): ${blockState.unmet_blockers.join(", ")}`,
+      );
+    }
+  }
+
   let finalStatus = input.to_status;
   let criteriaFailures: string[] | undefined;
   let resultSnap: string | null =
@@ -744,6 +766,236 @@ export async function requestChanges(
   return appendEvent(taskId, actorAgentId, "changes_requested", {
     comment: comment.slice(0, COMMENT_MAX),
   });
+}
+
+// -- v0.10: dependencies & subtasks ------------------------------------------
+
+export type TaskDependency = {
+  blocker_task_id: string;
+  blocked_task_id: string;
+  created_at: number;
+  created_by_agent_id: string | null;
+};
+
+const MAX_DEPS_PER_TASK = 20;
+
+export function addTaskDependency(input: {
+  blocker_task_id: string;
+  blocked_task_id: string;
+  actor_agent_id: string;
+}): TaskDependency {
+  const blocker = getTask(input.blocker_task_id);
+  const blocked = getTask(input.blocked_task_id);
+  if (!blocker) throw new Error("Blocker task not found.");
+  if (!blocked) throw new Error("Blocked task not found.");
+  if (blocker.id === blocked.id) throw new Error("A task can't block itself.");
+  if (blocked.owner_agent_id !== input.actor_agent_id) {
+    throw new Error("Only the blocked task's owner can add a dependency.");
+  }
+  // Explicit duplicate check — otherwise cycle detection fires spuriously
+  // (a→b existing already creates path b→a through the existing edge).
+  const exists = db()
+    .prepare(
+      `SELECT 1 FROM task_dependencies WHERE blocker_task_id = ? AND blocked_task_id = ?`,
+    )
+    .get(input.blocker_task_id, input.blocked_task_id);
+  if (exists) throw new Error("Dependency already exists.");
+  // cycle detection — does blocker (transitively) already depend on blocked?
+  if (wouldCreateCycle(input.blocker_task_id, input.blocked_task_id)) {
+    throw new Error("That dependency would create a cycle.");
+  }
+  // fan-out cap on each side
+  const incoming = (
+    db()
+      .prepare(
+        "SELECT COUNT(*) AS n FROM task_dependencies WHERE blocked_task_id = ?",
+      )
+      .get(input.blocked_task_id) as { n: number }
+  ).n;
+  if (incoming >= MAX_DEPS_PER_TASK) {
+    throw new Error(`Task already has ${MAX_DEPS_PER_TASK} blockers (limit).`);
+  }
+  const now = Date.now();
+  try {
+    db()
+      .prepare(
+        `INSERT INTO task_dependencies
+         (blocker_task_id, blocked_task_id, created_at, created_by_agent_id)
+         VALUES (?, ?, ?, ?)`,
+      )
+      .run(input.blocker_task_id, input.blocked_task_id, now, input.actor_agent_id);
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("UNIQUE")) {
+      throw new Error("Dependency already exists.");
+    }
+    throw err;
+  }
+  logAudit("task.dep_add", {
+    agentId: input.actor_agent_id,
+    detail: {
+      blocker: input.blocker_task_id,
+      blocked: input.blocked_task_id,
+    },
+  });
+  touchUpdated(input.blocked_task_id);
+  if (blocked.conversation_id) {
+    recordConversationEvent(
+      blocked.conversation_id,
+      "task.status_changed",
+      blocked.id,
+    );
+  }
+  return {
+    blocker_task_id: input.blocker_task_id,
+    blocked_task_id: input.blocked_task_id,
+    created_at: now,
+    created_by_agent_id: input.actor_agent_id,
+  };
+}
+
+export function removeTaskDependency(input: {
+  blocker_task_id: string;
+  blocked_task_id: string;
+  actor_agent_id: string;
+}): void {
+  const blocked = getTask(input.blocked_task_id);
+  if (!blocked) throw new Error("Blocked task not found.");
+  if (blocked.owner_agent_id !== input.actor_agent_id) {
+    throw new Error("Only the blocked task's owner can remove a dependency.");
+  }
+  const info = db()
+    .prepare(
+      `DELETE FROM task_dependencies WHERE blocker_task_id = ? AND blocked_task_id = ?`,
+    )
+    .run(input.blocker_task_id, input.blocked_task_id);
+  if (info.changes === 0) throw new Error("Dependency not found.");
+  logAudit("task.dep_remove", {
+    agentId: input.actor_agent_id,
+    detail: {
+      blocker: input.blocker_task_id,
+      blocked: input.blocked_task_id,
+    },
+  });
+  touchUpdated(input.blocked_task_id);
+}
+
+export function listBlockers(taskId: string): TaskDependency[] {
+  return db()
+    .prepare(
+      `SELECT blocker_task_id, blocked_task_id, created_at, created_by_agent_id
+       FROM task_dependencies WHERE blocked_task_id = ?
+       ORDER BY created_at ASC`,
+    )
+    .all(taskId) as TaskDependency[];
+}
+
+export function listBlocking(taskId: string): TaskDependency[] {
+  return db()
+    .prepare(
+      `SELECT blocker_task_id, blocked_task_id, created_at, created_by_agent_id
+       FROM task_dependencies WHERE blocker_task_id = ?
+       ORDER BY created_at ASC`,
+    )
+    .all(taskId) as TaskDependency[];
+}
+
+export function listChildren(taskId: string): Task[] {
+  return db()
+    .prepare(
+      `SELECT ${TASK_COLUMNS} FROM tasks
+       WHERE parent_task_id = ?
+       ORDER BY created_at ASC`,
+    )
+    .all(taskId) as Task[];
+}
+
+function wouldCreateCycle(blockerId: string, blockedId: string): boolean {
+  // Edge convention: (blocker, blocked) = "blocker must finish before blocked".
+  // Adding (blocker, blocked) creates a cycle iff there's already a forward
+  // path blocked → ... → blocker following existing blocker→blocked edges.
+  // listBlocking(x) returns edges WHERE blocker_task_id = x (outgoing).
+  const seen = new Set<string>();
+  const stack = [blockedId];
+  while (stack.length) {
+    const cur = stack.pop()!;
+    if (cur === blockerId) return true;
+    if (seen.has(cur)) continue;
+    seen.add(cur);
+    const downstream = listBlocking(cur).map((d) => d.blocked_task_id);
+    stack.push(...downstream);
+  }
+  return false;
+}
+
+export function isTaskBlocked(taskId: string): {
+  blocked: boolean;
+  unmet_blockers: string[];
+} {
+  const blockers = listBlockers(taskId);
+  if (blockers.length === 0) return { blocked: false, unmet_blockers: [] };
+  const unmet: string[] = [];
+  for (const b of blockers) {
+    const t = getTask(b.blocker_task_id);
+    if (!t) continue;
+    if (t.status !== "done" && t.status !== "cancelled") {
+      unmet.push(t.id);
+    }
+  }
+  return { blocked: unmet.length > 0, unmet_blockers: unmet };
+}
+
+export function createSubtask(input: {
+  parent_task_id: string;
+  title: string;
+  description?: string;
+  owner_agent_id: string;
+  assigned_to_agent_id?: string | null;
+  required_capabilities?: string[];
+  success_criteria?: unknown;
+  workspace_id?: string | null;
+  conversation_id?: string | null;
+}): Task {
+  const parent = getTask(input.parent_task_id);
+  if (!parent) throw new Error("Parent task not found.");
+  if (
+    parent.owner_agent_id !== input.owner_agent_id &&
+    parent.assigned_to_agent_id !== input.owner_agent_id
+  ) {
+    throw new Error("Only the parent task's owner or assignee can create a subtask.");
+  }
+  const child = createTask({
+    title: input.title,
+    description: input.description,
+    owner_agent_id: input.owner_agent_id,
+    assigned_to_agent_id: input.assigned_to_agent_id ?? null,
+    conversation_id: input.conversation_id ?? parent.conversation_id ?? null,
+    workspace_id: input.workspace_id ?? parent.workspace_id ?? null,
+    parent_task_id: parent.id,
+    required_capabilities: input.required_capabilities,
+    success_criteria: input.success_criteria,
+  });
+  // Auto-add as blocker on parent: parent can't be done until child is done.
+  try {
+    addTaskDependency({
+      blocker_task_id: child.id,
+      blocked_task_id: parent.id,
+      actor_agent_id: parent.owner_agent_id,
+    });
+  } catch (err) {
+    // If the owner is different (subtask created by assignee), the dep
+    // can't be added as-actor; we still allow the subtask. Surface the
+    // detail in audit, not as a user-facing error.
+    console.warn("subtask auto-dep skipped", {
+      child: child.id,
+      parent: parent.id,
+      err: err instanceof Error ? err.message : String(err),
+    });
+  }
+  logAudit("task.subtask_created", {
+    agentId: input.owner_agent_id,
+    detail: { parent: parent.id, child: child.id },
+  });
+  return child;
 }
 
 export function parseRequiredCapabilities(t: Task): string[] {

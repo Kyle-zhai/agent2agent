@@ -131,12 +131,80 @@ UI 在 `/app/c/{conv}/tasks/{tsk}` 展示完整时间线，agent 端读 `GET /ta
 `task.create` / `task.assign` / `task.status_change` / `task.comment` /
 `task.success_criteria_pass` / `task.success_criteria_fail`。
 
-## 局限（v0.5）
+## v0.10 — Dependencies + Subtasks
 
-- 没有**沙箱**——`test_command` criterion 不会真跑，永远 fail。沙箱在 v0.6。
-- 没有 task 依赖（blocked_by）。在 schema 里有 `parent_task_id`，但没暴露给 UI。
-- 没有自动 reviewer agent——human + agent 都得手点 approve。v0.7 加自动 reviewer agent 模板。
-- 评论只有纯文本——没 mention、没 markdown 渲染。
+### Schema
+
+```sql
+CREATE TABLE task_dependencies (
+  blocker_task_id TEXT NOT NULL,   -- must finish before blocked
+  blocked_task_id TEXT NOT NULL,   -- waits on blocker
+  created_at INTEGER NOT NULL,
+  created_by_agent_id TEXT,
+  PRIMARY KEY (blocker_task_id, blocked_task_id),
+  CHECK (blocker_task_id != blocked_task_id)
+);
+```
+
+### 状态机扩展
+
+`transitionTaskStatus` 在以下转移前查 `isTaskBlocked(t.id)`：
+
+- `→ in_progress`
+- `→ awaiting_review`
+- `→ done`
+
+任一未 done/cancelled 的 blocker 存在 → 抛错 `Task is blocked by N unfinished task(s)`，并写 audit `task.transition_blocked`。
+
+### 规则
+
+- 自循环（blocker === blocked）拒绝
+- 重复 edge 拒绝
+- **环检测**：添加 (blocker, blocked) 时遍历 `listBlocking(blocked)` 的 forward DAG，若到达 blocker → 拒绝
+- 每个 task 最多 20 个 blocker
+- 只有 **blocked 任务的 owner** 能加/删 dependency
+
+### Subtasks
+
+`createSubtask(parent_task_id, ...)` 复用 `createTask`，外加：
+
+1. 子 task 的 `parent_task_id` 指向父
+2. 自动 `addTaskDependency(child → parent)` —— **父必须等所有子完成才能 done/in_progress**
+3. audit `task.subtask_created`
+
+只有 **父 task 的 owner 或 assignee** 能 spawn 子 task。
+
+### 新工具（v0.7 注册表新增）
+
+| Tool | requires | 作用 |
+|---|---|---|
+| `task.create_subtask` | `task.update` | 父下建子 + 自动加 blocking edge |
+| `task.add_dependency` | `task.update` | 显式建 blocker→blocked 边 |
+
+### UI（task 详情页右栏）
+
+- ↑ Parent task（如果有）
+- 🟪 Blockers (N) + ⛔ blocked 角标 + 可删
+- ➡ Blocking (N)
+- 🔽 Subtasks (N) + "+ Subtask" 表单
+
+### 测试
+
+`tests/lib/task-deps.test.ts` 8 项：
+- blocked task 不能离开 assigned 状态
+- 自循环 / 环 / 重复拒绝
+- 非 owner 操作拒绝
+- 子 task 自动 block 父；父 done 等所有子 done
+- 非 parent owner/assignee 不能 spawn 子
+
+87/87 全过。
+
+## 局限（当前）
+
+- 没有自动 reviewer agent —— v0.11 加（用 brain 自动审 diff_review criterion）
+- 没有冲突 resolution UI —— v0.11
+- 没有反向 MCP RPC（server 调 agent 本地工具）—— v0.12
+- 评论只有纯文本——没 mention、没 markdown 渲染
 
 ## 完整例子：assigned → done（在 v0.5 能做）
 

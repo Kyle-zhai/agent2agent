@@ -10,14 +10,21 @@ import {
 import { getAgent } from "@/lib/agents";
 import {
   addTaskComment,
+  addTaskDependency,
   approveTask,
   assignTask,
+  createSubtask,
   getTask,
+  isTaskBlocked,
   isTransitionAllowed,
+  listBlockers,
+  listBlocking,
+  listChildren,
   listTaskArtifacts,
   listTaskEvents,
   parseRequiredCapabilities,
   parseSuccessCriteria,
+  removeTaskDependency,
   requestChanges,
   transitionTaskStatus,
 } from "@/lib/tasks";
@@ -139,6 +146,83 @@ async function approveAction(formData: FormData) {
   redirect(`/app/c/${convId}/tasks/${taskId}`);
 }
 
+async function addDepAction(formData: FormData) {
+  "use server";
+  const user = await requireUser();
+  const convId = String(formData.get("conversation_id") ?? "");
+  const taskId = String(formData.get("task_id") ?? "");
+  const blockerId = String(formData.get("blocker_task_id") ?? "").trim();
+  const { myAgentId } = requireUserMember(convId, user.id);
+  try {
+    addTaskDependency({
+      blocker_task_id: blockerId,
+      blocked_task_id: taskId,
+      actor_agent_id: myAgentId,
+    });
+  } catch (err) {
+    redirect(
+      `/app/c/${convId}/tasks/${taskId}?error=${encodeURIComponent(
+        err instanceof Error ? err.message : "Add dep failed.",
+      )}`,
+    );
+  }
+  revalidatePath(`/app/c/${convId}/tasks/${taskId}`);
+  redirect(`/app/c/${convId}/tasks/${taskId}`);
+}
+
+async function removeDepAction(formData: FormData) {
+  "use server";
+  const user = await requireUser();
+  const convId = String(formData.get("conversation_id") ?? "");
+  const taskId = String(formData.get("task_id") ?? "");
+  const blockerId = String(formData.get("blocker_task_id") ?? "");
+  const { myAgentId } = requireUserMember(convId, user.id);
+  try {
+    removeTaskDependency({
+      blocker_task_id: blockerId,
+      blocked_task_id: taskId,
+      actor_agent_id: myAgentId,
+    });
+  } catch (err) {
+    redirect(
+      `/app/c/${convId}/tasks/${taskId}?error=${encodeURIComponent(
+        err instanceof Error ? err.message : "Remove dep failed.",
+      )}`,
+    );
+  }
+  revalidatePath(`/app/c/${convId}/tasks/${taskId}`);
+  redirect(`/app/c/${convId}/tasks/${taskId}`);
+}
+
+async function createSubtaskAction(formData: FormData) {
+  "use server";
+  const user = await requireUser();
+  const convId = String(formData.get("conversation_id") ?? "");
+  const parentId = String(formData.get("parent_task_id") ?? "");
+  const title = String(formData.get("title") ?? "").trim();
+  const assignee = String(formData.get("assigned_to_agent_id") ?? "") || null;
+  const { myAgentId } = requireUserMember(convId, user.id);
+  if (!title) {
+    redirect(`/app/c/${convId}/tasks/${parentId}?error=title+required`);
+  }
+  try {
+    createSubtask({
+      parent_task_id: parentId,
+      title,
+      owner_agent_id: myAgentId,
+      assigned_to_agent_id: assignee,
+    });
+  } catch (err) {
+    redirect(
+      `/app/c/${convId}/tasks/${parentId}?error=${encodeURIComponent(
+        err instanceof Error ? err.message : "Create subtask failed.",
+      )}`,
+    );
+  }
+  revalidatePath(`/app/c/${convId}/tasks/${parentId}`);
+  redirect(`/app/c/${convId}/tasks/${parentId}`);
+}
+
 async function requestChangesAction(formData: FormData) {
   "use server";
   const user = await requireUser();
@@ -200,6 +284,18 @@ export default async function TaskDetailPage({
     "open",
   ];
   const allowed = allTransitions.filter((to) => isTransitionAllowed(t.status, to));
+  const blockers = listBlockers(t.id);
+  const blocking = listBlocking(t.id);
+  const children = listChildren(t.id);
+  const blockState = isTaskBlocked(t.id);
+  const parent = t.parent_task_id ? getTask(t.parent_task_id) : null;
+  // Candidate blockers for "add dependency" UI = sibling tasks in same conv
+  const siblings = listTasksForConversation(convId).filter(
+    (x) =>
+      x.id !== t.id &&
+      x.id !== t.parent_task_id &&
+      !blockers.some((b) => b.blocker_task_id === x.id),
+  );
 
   return (
     <div className="min-h-screen bg-[color:var(--color-canvas)]">
@@ -455,6 +551,197 @@ export default async function TaskDetailPage({
               ↗ Workspace bound to this task
             </Link>
           ) : null}
+
+          {parent ? (
+            <Link
+              href={`/app/c/${convId}/tasks/${parent.id}`}
+              className="surface surface-hover p-3 block text-[12px]"
+            >
+              ↑ Parent task:{" "}
+              <span className="font-medium">{parent.title}</span>{" "}
+              <span className={STATUS_LABEL[parent.status].cls}>
+                {STATUS_LABEL[parent.status].text}
+              </span>
+            </Link>
+          ) : null}
+
+          <div className="surface p-3">
+            <div className="text-[11px] uppercase tracking-wider text-[color:var(--color-ink-soft)] mb-2 flex items-center justify-between">
+              Blockers ({blockers.length})
+              {blockState.blocked ? (
+                <span className="tag tag-pink text-[10px]">
+                  ⛔ blocked
+                </span>
+              ) : null}
+            </div>
+            <ul className="space-y-1.5 text-[12px]">
+              {blockers.length === 0 ? (
+                <li className="text-[color:var(--color-ink-soft)]">
+                  no blockers
+                </li>
+              ) : (
+                blockers.map((b) => {
+                  const bt = getTask(b.blocker_task_id);
+                  if (!bt) return null;
+                  return (
+                    <li
+                      key={b.blocker_task_id}
+                      className="flex items-center justify-between gap-2"
+                    >
+                      <Link
+                        href={`/app/c/${convId}/tasks/${bt.id}`}
+                        className="truncate flex-1 underline"
+                      >
+                        {bt.title}
+                      </Link>
+                      <span className={STATUS_LABEL[bt.status].cls}>
+                        {STATUS_LABEL[bt.status].text}
+                      </span>
+                      {isOwner ? (
+                        <form action={removeDepAction}>
+                          <input
+                            type="hidden"
+                            name="conversation_id"
+                            value={convId}
+                          />
+                          <input type="hidden" name="task_id" value={t.id} />
+                          <input
+                            type="hidden"
+                            name="blocker_task_id"
+                            value={bt.id}
+                          />
+                          <button
+                            type="submit"
+                            className="btn btn-ghost btn-sm"
+                            title="Remove dependency"
+                          >
+                            ×
+                          </button>
+                        </form>
+                      ) : null}
+                    </li>
+                  );
+                })
+              )}
+            </ul>
+            {isOwner && siblings.length > 0 ? (
+              <form action={addDepAction} className="mt-3 flex gap-1.5">
+                <input type="hidden" name="conversation_id" value={convId} />
+                <input type="hidden" name="task_id" value={t.id} />
+                <select
+                  name="blocker_task_id"
+                  className="input text-[12px] py-0.5 flex-1"
+                  defaultValue=""
+                >
+                  <option value="" disabled>
+                    add blocker…
+                  </option>
+                  {siblings.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.title.slice(0, 40)}
+                    </option>
+                  ))}
+                </select>
+                <button type="submit" className="btn btn-secondary btn-sm">
+                  Block
+                </button>
+              </form>
+            ) : null}
+          </div>
+
+          {blocking.length > 0 ? (
+            <div className="surface p-3">
+              <div className="text-[11px] uppercase tracking-wider text-[color:var(--color-ink-soft)] mb-2">
+                Blocking ({blocking.length})
+              </div>
+              <ul className="space-y-1 text-[12px]">
+                {blocking.map((b) => {
+                  const bt = getTask(b.blocked_task_id);
+                  if (!bt) return null;
+                  return (
+                    <li
+                      key={b.blocked_task_id}
+                      className="flex items-center justify-between gap-2"
+                    >
+                      <Link
+                        href={`/app/c/${convId}/tasks/${bt.id}`}
+                        className="truncate flex-1 underline"
+                      >
+                        {bt.title}
+                      </Link>
+                      <span className={STATUS_LABEL[bt.status].cls}>
+                        {STATUS_LABEL[bt.status].text}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ) : null}
+
+          <div className="surface p-3">
+            <div className="text-[11px] uppercase tracking-wider text-[color:var(--color-ink-soft)] mb-2">
+              Subtasks ({children.length})
+            </div>
+            {children.length === 0 ? (
+              <p className="text-[12px] text-[color:var(--color-ink-soft)] mb-2">
+                Break into smaller assignable units.
+              </p>
+            ) : (
+              <ul className="space-y-1 text-[12px] mb-2">
+                {children.map((c) => (
+                  <li
+                    key={c.id}
+                    className="flex items-center justify-between gap-2"
+                  >
+                    <Link
+                      href={`/app/c/${convId}/tasks/${c.id}`}
+                      className="truncate flex-1 underline"
+                    >
+                      {c.title}
+                    </Link>
+                    <span className={STATUS_LABEL[c.status].cls}>
+                      {STATUS_LABEL[c.status].text}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {isOwner || isAssignee ? (
+              <form
+                action={createSubtaskAction}
+                className="space-y-1.5"
+              >
+                <input type="hidden" name="conversation_id" value={convId} />
+                <input type="hidden" name="parent_task_id" value={t.id} />
+                <input
+                  name="title"
+                  required
+                  maxLength={200}
+                  placeholder="Subtask title…"
+                  className="input text-[12px] py-1"
+                />
+                <select
+                  name="assigned_to_agent_id"
+                  className="input text-[12px] py-1"
+                  defaultValue=""
+                >
+                  <option value="">(unassigned)</option>
+                  {members.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.avatar_emoji} {m.display_name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="submit"
+                  className="btn btn-secondary btn-sm w-full"
+                >
+                  + Subtask
+                </button>
+              </form>
+            ) : null}
+          </div>
         </aside>
       </main>
     </div>

@@ -12,6 +12,8 @@ import {
   readFileAt,
 } from "./workspaces";
 import {
+  addTaskDependency,
+  createSubtask,
   getTask,
   parseRequiredCapabilities,
   parseSuccessCriteria,
@@ -303,6 +305,83 @@ const agentSendMessage: Tool = {
 // keep ref to silence unused import (saveAttachment is exported for downstream tools)
 void saveAttachment;
 
+const taskCreateSubtask: Tool = {
+  name: "task.create_subtask",
+  description:
+    "Create a subtask under a parent task. The parent is auto-blocked by the new child until the child is done.",
+  requires_capability: "task.update",
+  schema: {
+    type: "object",
+    required: ["parent_task_id", "title"],
+    properties: {
+      parent_task_id: { type: "string", description: "tsk_... parent" },
+      title: { type: "string", description: "subtask title" },
+      description: { type: "string", description: "longer body" },
+      assigned_to_agent_id: { type: "string", description: "optional assignee id" },
+      required_capabilities: {
+        type: "array",
+        description: "capability names assignee must have",
+      },
+      success_criteria: {
+        type: "array",
+        description: "JSON array of SuccessCriterion",
+      },
+    },
+  },
+  async invoke(args, ctx) {
+    const parentId = need<string>(args, "parent_task_id", "string");
+    const title = need<string>(args, "title", "string");
+    const description = optional<string>(args, "description", "string");
+    const assignee = optional<string>(args, "assigned_to_agent_id", "string");
+    const reqCaps = Array.isArray(args.required_capabilities)
+      ? (args.required_capabilities as unknown[]).filter(
+          (s): s is string => typeof s === "string",
+        )
+      : undefined;
+    const criteria = args.success_criteria;
+    const child = createSubtask({
+      parent_task_id: parentId,
+      title,
+      description,
+      owner_agent_id: ctx.agent.id,
+      assigned_to_agent_id: assignee ?? null,
+      required_capabilities: reqCaps,
+      success_criteria: criteria,
+    });
+    return {
+      task: {
+        ...child,
+        required_capabilities: parseRequiredCapabilities(child),
+        success_criteria: parseSuccessCriteria(child),
+      },
+    };
+  },
+};
+
+const taskAddDependency: Tool = {
+  name: "task.add_dependency",
+  description:
+    "Mark task B as blocked by task A. B cannot leave 'assigned' until A is done. Cycles are rejected.",
+  requires_capability: "task.update",
+  schema: {
+    type: "object",
+    required: ["blocker_task_id", "blocked_task_id"],
+    properties: {
+      blocker_task_id: { type: "string", description: "must finish first" },
+      blocked_task_id: { type: "string", description: "waits on blocker" },
+    },
+  },
+  async invoke(args, ctx) {
+    const blocker = need<string>(args, "blocker_task_id", "string");
+    const blocked = need<string>(args, "blocked_task_id", "string");
+    return addTaskDependency({
+      blocker_task_id: blocker,
+      blocked_task_id: blocked,
+      actor_agent_id: ctx.agent.id,
+    });
+  },
+};
+
 // -------------------------------------------------------------------------
 // Registry
 // -------------------------------------------------------------------------
@@ -312,6 +391,8 @@ export const TOOLS: Record<string, Tool> = {
   [workspaceWriteFile.name]: workspaceWriteFile,
   [workspaceListFiles.name]: workspaceListFiles,
   [taskUpdateStatus.name]: taskUpdateStatus,
+  [taskCreateSubtask.name]: taskCreateSubtask,
+  [taskAddDependency.name]: taskAddDependency,
   [agentSendMessage.name]: agentSendMessage,
 };
 
