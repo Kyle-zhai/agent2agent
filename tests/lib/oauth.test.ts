@@ -184,6 +184,26 @@ describe("unlinkIdentity", () => {
   });
 });
 
+describe("audit retention", () => {
+  it("pruneAuditLog removes only rows older than the cutoff", () => {
+    const { pruneAuditLog, logAudit } = require("../../lib/audit");
+    seedExistingUser("usr_x", "x@x.test");
+    logAudit("auth.signin", { userId: "usr_x", detail: {} });
+    // Force a fake old row directly
+    db()
+      .prepare(
+        `INSERT INTO audit_log (id, user_id, agent_id, action, detail_json, ip, user_agent, created_at)
+         VALUES (?, ?, NULL, 'auth.signin', '{}', NULL, NULL, ?)`,
+      )
+      .run("aud_old1", "usr_x", NOW - 100 * 24 * 3600 * 1000);
+    const before = (db().prepare("SELECT COUNT(*) AS n FROM audit_log").get() as { n: number }).n;
+    const removed = pruneAuditLog(90 * 24 * 3600 * 1000);
+    const after = (db().prepare("SELECT COUNT(*) AS n FROM audit_log").get() as { n: number }).n;
+    assert.equal(removed, 1);
+    assert.equal(after, before - 1);
+  });
+});
+
 describe("upsertIdentity — same (provider, provider_user_id) cannot link two users", () => {
   it("throws on cross-user collision", () => {
     seedExistingUser("usr_a", "a@a.test");

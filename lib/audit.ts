@@ -121,6 +121,19 @@ export function listAuditForUser(userId: string, limit = 100): AuditLog[] {
     .all(userId, userId, limit) as AuditLog[];
 }
 
+/** v0.13.2 retention helper.
+ *  Removes audit_log rows older than `olderThanMs` (default 90 days).
+ *  Returns number of rows deleted. Operator should run periodically
+ *  (e.g., daily cron). No automatic scheduling because the project ships
+ *  as a single Node process with no cron framework. */
+export function pruneAuditLog(olderThanMs = 90 * 24 * 3600 * 1000): number {
+  const cutoff = Date.now() - olderThanMs;
+  const info = db()
+    .prepare("DELETE FROM audit_log WHERE created_at < ?")
+    .run(cutoff);
+  return info.changes;
+}
+
 export function ipFromRequest(req: Request): string | null {
   const fwd = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
   return fwd || req.headers.get("x-real-ip") || null;

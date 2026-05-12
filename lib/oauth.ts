@@ -600,7 +600,53 @@ export function newOAuthUser(profile: OAuthProfile, provider: string): string {
        VALUES (?, ?, ?, '', '', ?)`,
     )
     .run(id, email, displayName, now);
+  // Best-effort: pull the provider avatar so the user has a visual identity
+  // from sign-up. Fire-and-forget — failure here must not block sign-in.
+  if (profile.avatar_url) {
+    void pullOAuthAvatar(id, profile.avatar_url).catch((err) => {
+      console.warn("oauth avatar pull failed", {
+        user_id: id,
+        provider,
+        err: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }
   return id;
+}
+
+const AVATAR_PULL_TIMEOUT_MS = 6_000;
+const AVATAR_MAX_BYTES = 1 * 1024 * 1024;
+
+async function pullOAuthAvatar(userId: string, url: string): Promise<void> {
+  if (!/^https?:\/\//.test(url)) return; // explicit scheme allowlist
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), AVATAR_PULL_TIMEOUT_MS);
+  let resp: Response;
+  try {
+    resp = await fetch(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!resp.ok) return;
+  const ab = await resp.arrayBuffer();
+  if (ab.byteLength > AVATAR_MAX_BYTES) return;
+  const buf = Buffer.from(ab);
+  const declaredMime = resp.headers.get("content-type") ?? "image/png";
+
+  // Defer imports to avoid pulling heavy avatar / fs code into every oauth
+  // callback path — only the signup path needs it.
+  const { saveAvatarBytes } = await import("./avatars");
+  try {
+    const result = saveAvatarBytes(`user_${userId}`, buf, declaredMime);
+    // Only set if the user hasn't already configured an avatar locally.
+    db()
+      .prepare(
+        `UPDATE users SET avatar_blob_path = ? WHERE id = ? AND avatar_blob_path IS NULL`,
+      )
+      .run(result.blob_path, userId);
+  } catch {
+    /* file-validation rejected the bytes — drop silently */
+  }
 }
 
 export function handleCallbackProfile(

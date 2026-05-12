@@ -480,6 +480,63 @@ const t1 = ensureTask({
 });
 console.log(`  task:     ${t1}  (Alice's coder → Bob's reviewer — schema CHECK)`);
 
+// v0.13 demo: Hub & Spoke fan-out research parent + 3 parallel subtasks
+const parent = ensureTask({
+  convId: conv2,
+  ownerAgentId: aliceMe,
+  assigneeAgentId: null,
+  title: "Market research roll-up",
+  description:
+    "Research three angles in parallel, then synthesize. v0.13 hub-spoke demo.",
+  requiredCaps: [],
+  successCriteria: [],
+});
+// Create 3 sibling subtasks pointing back to the parent.
+for (const [agentId, slice] of [
+  [aliceCoder, "market"],
+  [bobReviewer, "competitors"],
+  [carolDesigner, "tech"],
+]) {
+  const child = ensureTask({
+    convId: conv2,
+    ownerAgentId: aliceMe,
+    assigneeAgentId: agentId,
+    title: `Research: ${slice}`,
+    description: `Subtask of "Market research roll-up" — write findings to a notes/${slice}.md file.`,
+    requiredCaps: [],
+    successCriteria: [],
+  });
+  // wire parent_task_id (ensureTask doesn't support it — patch in directly)
+  db.prepare("UPDATE tasks SET parent_task_id = ? WHERE id = ?").run(parent, child);
+  // child blocks parent
+  db.prepare(
+    `INSERT OR IGNORE INTO task_dependencies
+     (blocker_task_id, blocked_task_id, created_at, created_by_agent_id)
+     VALUES (?, ?, ?, ?)`,
+  ).run(child, parent, NOW, aliceMe);
+}
+console.log(`  hub-spoke parent: ${parent}  (3 subtasks blocking it)`);
+
+// v0.13 demo: debate panel task
+const debateTask = ensureTask({
+  convId: conv2,
+  ownerAgentId: aliceMe,
+  assigneeAgentId: bobMe,
+  title: "Decide: monorepo vs polyrepo for v2",
+  description:
+    "Bob: write a short proposal in notes/decision.md, then trigger debate_panel for done. Pro/con/arbiter set up below.",
+  requiredCaps: [],
+  successCriteria: [
+    {
+      type: "debate_panel",
+      pro_agent_id: aliceCoder,
+      con_agent_id: bobReviewer,
+      arbiter_agent_id: carolDesigner,
+    },
+  ],
+});
+console.log(`  debate task:     ${debateTask}  (pro=aliceCoder con=bobReviewer arb=carolDesigner)`);
+
 console.log(`
 Seed complete.
 

@@ -34,6 +34,7 @@ import {
   getSnapshot,
   listWorkspacesForConversation,
 } from "@/lib/workspaces";
+import { listSandboxRunsForTask } from "@/lib/sandbox";
 import {
   listTasksForConversation,
 } from "@/lib/tasks";
@@ -329,6 +330,7 @@ export default async function TaskDetailPage({
   const blockers = listBlockers(t.id);
   const blocking = listBlocking(t.id);
   const children = listChildren(t.id);
+  const sandboxRuns = listSandboxRunsForTask(t.id);
   const blockState = isTaskBlocked(t.id);
   const parent = t.parent_task_id ? getTask(t.parent_task_id) : null;
   // Candidate blockers for "add dependency" UI = sibling tasks in same conv
@@ -582,6 +584,59 @@ export default async function TaskDetailPage({
                   ✎ Request changes
                 </button>
               </form>
+            </div>
+          ) : null}
+
+          {sandboxRuns.length > 0 ? (
+            <div className="surface p-3">
+              <div className="text-[11px] uppercase tracking-wider text-[color:var(--color-ink-soft)] mb-2">
+                Sandbox runs ({sandboxRuns.length})
+              </div>
+              <ul className="space-y-2 text-[11px]">
+                {sandboxRuns.map((r) => (
+                  <li
+                    key={r.id}
+                    className="border-l-2 border-[color:var(--color-line)] pl-2"
+                  >
+                    <div className="flex items-center gap-1.5 text-[10px] text-[color:var(--color-ink-soft)]">
+                      <span
+                        className={
+                          r.exit_code === 0
+                            ? "tag tag-green"
+                            : r.exit_code === null
+                            ? "tag"
+                            : "tag tag-pink"
+                        }
+                      >
+                        exit {r.exit_code ?? "?"}
+                      </span>
+                      <span>{r.runtime}</span>
+                      <span>·</span>
+                      <span>{r.duration_ms != null ? `${r.duration_ms}ms` : "running"}</span>
+                    </div>
+                    <code className="font-mono block mt-0.5 truncate">
+                      {r.cmd}
+                    </code>
+                    {r.stdout || r.stderr ? (
+                      <details className="mt-1">
+                        <summary className="cursor-pointer text-[10px] text-[color:var(--color-ink-soft)] select-none">
+                          stdout/stderr
+                        </summary>
+                        {r.stdout ? (
+                          <pre className="text-[10px] font-mono whitespace-pre-wrap mt-1 bg-[color:var(--color-tint-green)] p-1.5 rounded">
+                            {r.stdout}
+                          </pre>
+                        ) : null}
+                        {r.stderr ? (
+                          <pre className="text-[10px] font-mono whitespace-pre-wrap mt-1 bg-[color:var(--color-tint-pink)] p-1.5 rounded">
+                            {r.stderr}
+                          </pre>
+                        ) : null}
+                      </details>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
             </div>
           ) : null}
 
