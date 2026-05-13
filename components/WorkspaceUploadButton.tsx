@@ -35,16 +35,20 @@ export function WorkspaceUploadButton({
   return (
     <form
       ref={formRef}
-      action={async (fd) => {
-        // Snapshot file count for the pending UI.
+      // Pass the server action directly — wrapping it in a client-side async
+      // closure breaks file uploads because the FormData has to traverse a
+      // different (non-multipart) code path.
+      action={action}
+      onSubmit={(e) => {
+        const fd = new FormData(e.currentTarget);
         const fs = fd.getAll("files");
         const realFiles = fs.filter((f) => f instanceof File && f.size > 0);
-        setStatus({ kind: "uploading", count: realFiles.length });
-        try {
-          await action(fd);
-        } finally {
+        if (realFiles.length === 0) {
+          e.preventDefault();
           setStatus({ kind: "idle" });
+          return;
         }
+        setStatus({ kind: "uploading", count: realFiles.length });
       }}
       className="surface p-3 flex items-center gap-2"
     >
