@@ -35,21 +35,36 @@ export function WorkspaceUploadButton({
       <input type="hidden" name="conversation_id" value={convId} />
       <input type="hidden" name="workspace_id" value={wsId} />
 
-      <label className="btn btn-secondary btn-sm cursor-pointer inline-flex items-center gap-1.5">
+      {/* Hidden, positioned off-screen rather than `sr-only` so the input
+          is always interactable even in browsers that treat clipped
+          elements as non-focusable. Triggered via a real button onClick
+          AND wrapped in an htmlFor label as belt-and-suspenders. */}
+      <input
+        ref={inputRef}
+        id="workspace-upload-input"
+        type="file"
+        name="files"
+        multiple
+        style={{
+          position: "absolute",
+          left: "-9999px",
+          width: "1px",
+          height: "1px",
+          opacity: 0,
+        }}
+        onChange={(e) => {
+          const fs = e.currentTarget.files;
+          setPicked(fs ? Array.from(fs).map((f) => f.name) : []);
+        }}
+      />
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        className="btn btn-secondary btn-sm inline-flex items-center gap-1.5"
+      >
         <span>📁</span>
         <span>Pick files</span>
-        <input
-          ref={inputRef}
-          type="file"
-          name="files"
-          multiple
-          className="sr-only"
-          onChange={(e) => {
-            const fs = e.currentTarget.files;
-            setPicked(fs ? Array.from(fs).map((f) => f.name) : []);
-          }}
-        />
-      </label>
+      </button>
 
       <button
         type="submit"
