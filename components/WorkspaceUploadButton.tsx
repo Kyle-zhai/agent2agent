@@ -3,18 +3,17 @@
 import { useRef, useState } from "react";
 
 /**
- * One-click file upload.
+ * Two-step but bulletproof upload flow:
+ *   1. Click "Pick files" → OS file picker
+ *   2. Selected file names show; click "Upload" → server action runs
  *
- * The native <input type="file">'s "Choose files / No file chosen" label is
- * rendered by the OS in the system language (Chinese on a zh-CN macOS, etc.)
- * and cannot be restyled. We hide it with `sr-only` and wrap it in a <label>
- * — clicking the label is the most reliable way to trigger the OS picker
- * across browsers, more so than synthetic `.click()` from a button.
+ * Auto-submit via `requestSubmit()` on file change was unreliable in some
+ * browsers / HMR states — `<form action={serverAction}>` was getting hit
+ * before React's onSubmit pipeline saw the file inputs. A real <button
+ * type="submit"> is the path Next.js guarantees to work for Server Actions.
  *
- * On file selection, we update local state and submit the form via
- * `requestSubmit()`. We schedule the submit in a `requestAnimationFrame`
- * so React has flushed the input's value into the form DOM before submit
- * — otherwise the FormData snapshot can miss the files on some browsers.
+ * The native input still has its OS-locale "Choose files / No file chosen"
+ * label, so we hide it with `sr-only` and render our own button instead.
  */
 export function WorkspaceUploadButton({
   convId,
@@ -25,72 +24,50 @@ export function WorkspaceUploadButton({
   wsId: string;
   action: (formData: FormData) => Promise<void>;
 }) {
-  const formRef = useRef<HTMLFormElement>(null);
-  const [status, setStatus] = useState<
-    | { kind: "idle" }
-    | { kind: "selected"; count: number; sample: string }
-    | { kind: "uploading"; count: number }
-  >({ kind: "idle" });
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [picked, setPicked] = useState<string[]>([]);
 
   return (
     <form
-      ref={formRef}
-      // Pass the server action directly — wrapping it in a client-side async
-      // closure breaks file uploads because the FormData has to traverse a
-      // different (non-multipart) code path.
       action={action}
-      onSubmit={(e) => {
-        const fd = new FormData(e.currentTarget);
-        const fs = fd.getAll("files");
-        const realFiles = fs.filter((f) => f instanceof File && f.size > 0);
-        if (realFiles.length === 0) {
-          e.preventDefault();
-          setStatus({ kind: "idle" });
-          return;
-        }
-        setStatus({ kind: "uploading", count: realFiles.length });
-      }}
-      className="surface p-3 flex items-center gap-2"
+      className="surface p-3 flex flex-wrap items-center gap-2"
     >
       <input type="hidden" name="conversation_id" value={convId} />
       <input type="hidden" name="workspace_id" value={wsId} />
 
-      <label className="btn btn-primary btn-sm cursor-pointer inline-flex items-center gap-1.5">
-        <span>⬆</span>
-        <span>Upload local files</span>
+      <label className="btn btn-secondary btn-sm cursor-pointer inline-flex items-center gap-1.5">
+        <span>📁</span>
+        <span>Pick files</span>
         <input
+          ref={inputRef}
           type="file"
           name="files"
           multiple
           className="sr-only"
-          // Re-set value on every click so re-selecting the same file fires onChange.
-          onClick={(e) => {
-            (e.currentTarget as HTMLInputElement).value = "";
-          }}
           onChange={(e) => {
             const fs = e.currentTarget.files;
-            if (!fs || fs.length === 0) return;
-            const arr = Array.from(fs);
-            setStatus({
-              kind: "selected",
-              count: arr.length,
-              sample: arr[0].name,
-            });
-            // Wait one frame so the input's selected files are reflected in
-            // the form before serialization.
-            requestAnimationFrame(() => {
-              formRef.current?.requestSubmit();
-            });
+            setPicked(fs ? Array.from(fs).map((f) => f.name) : []);
           }}
         />
       </label>
 
+      <button
+        type="submit"
+        disabled={picked.length === 0}
+        className="btn btn-primary btn-sm inline-flex items-center gap-1.5"
+      >
+        <span>⬆</span>
+        <span>
+          Upload{picked.length > 0 ? ` (${picked.length})` : ""}
+        </span>
+      </button>
+
       <span className="text-[11px] text-[color:var(--color-ink-soft)] flex-1 truncate">
-        {status.kind === "uploading"
-          ? `Uploading ${status.count} file${status.count === 1 ? "" : "s"}…`
-          : status.kind === "selected"
-            ? `${status.count} file${status.count === 1 ? "" : "s"} (${status.sample})`
-            : "Pick files from your computer."}
+        {picked.length === 0
+          ? "Pick local files, then click Upload."
+          : picked.length === 1
+            ? picked[0]
+            : `${picked.length} files: ${picked.slice(0, 2).join(", ")}${picked.length > 2 ? "…" : ""}`}
       </span>
     </form>
   );
