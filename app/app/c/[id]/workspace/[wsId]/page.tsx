@@ -481,7 +481,10 @@ function Node({
           className="flex items-center gap-1.5 py-1 px-3 cursor-pointer select-none hover:bg-[color:var(--color-canvas)] transition-colors text-[13px]"
           style={{ paddingLeft: 12 + depth * 16 }}
         >
-          <span className="text-[10px] text-[color:var(--color-ink-soft)] inline-block w-3">
+          <span
+            className="text-[10px] text-[color:var(--color-ink-soft)] inline-block text-center"
+            style={{ width: "0.75rem" }}
+          >
             ▸
           </span>
           <span>📁</span>
@@ -527,14 +530,20 @@ function FileLeaf({
   // avoid nesting <form> inside <form>.
   void convId;
   void wsId;
+  // Finder-style: files at the same depth align with sibling folders.
+  // Both use `paddingLeft: 12 + depth * 16`. The first column is a
+  // fixed-width chevron column (empty for files, ▸/▾ for folders) so
+  // the icon column lines up identically.
   return (
     <li
       className="group flex items-center gap-1.5 py-1 px-3 hover:bg-[color:var(--color-canvas)] transition-colors text-[13px]"
-      style={{ paddingLeft: 12 + (depth + 0.6) * 16 }}
+      style={{ paddingLeft: 12 + depth * 16 }}
     >
-      <span className="text-[10px] text-[color:var(--color-ink-soft)] inline-block w-3">
-        {" "}
-      </span>
+      <span
+        className="text-[10px] text-[color:var(--color-ink-soft)] inline-block"
+        style={{ width: "0.75rem" }}
+        aria-hidden="true"
+      />
       <span>{fileIcon(name)}</span>
       <span className="flex-1 truncate font-mono">{name}</span>
       <span className="text-[11px] text-[color:var(--color-ink-soft)] tabular-nums">
