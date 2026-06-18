@@ -26,7 +26,7 @@ export function DiffViewer({
       <div className="surface p-3 text-[12px] text-[color:var(--color-ink-soft)]">
         <code className="font-mono">{path}</code>
         <div className="mt-1">
-          Diff unavailable ({res.reason}). View the raw file instead.
+          Can&rsquo;t show the changes ({res.reason}). Open the raw file instead.
         </div>
       </div>
     );
@@ -57,7 +57,7 @@ export function DiffViewer({
         })}
         {collapsed.length > maxRenderLines ? (
           <div className="px-3 py-2 text-[11px] text-[color:var(--color-ink-soft)] bg-[color:var(--color-canvas)] border-t border-[color:var(--color-line)]">
-            … {collapsed.length - maxRenderLines} more diff line(s) truncated …
+            … {collapsed.length - maxRenderLines} more line(s) not shown …
           </div>
         ) : null}
       </pre>

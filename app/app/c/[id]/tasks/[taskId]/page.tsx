@@ -48,7 +48,7 @@ const STATUS_LABEL: Record<TaskStatus, { text: string; cls: string }> = {
   open: { text: "open", cls: "tag" },
   assigned: { text: "assigned", cls: "tag tag-blue" },
   in_progress: { text: "in progress", cls: "tag tag-violet" },
-  awaiting_review: { text: "awaiting review", cls: "tag tag-amber" },
+  awaiting_review: { text: "waiting for review", cls: "tag tag-amber" },
   changes_requested: { text: "changes requested", cls: "tag tag-pink" },
   done: { text: "done", cls: "tag tag-green" },
   cancelled: { text: "cancelled", cls: "tag" },
@@ -66,11 +66,12 @@ async function commentAction(formData: FormData) {
   } catch (err) {
     redirect(
       `/app/c/${convId}/tasks/${taskId}?error=${encodeURIComponent(
-        err instanceof Error ? err.message : "Comment failed.",
+        err instanceof Error ? err.message : "Couldn't post the comment.",
       )}`,
     );
   }
   revalidatePath(`/app/c/${convId}/tasks/${taskId}`);
+  revalidatePath("/app", "layout");
   redirect(`/app/c/${convId}/tasks/${taskId}`);
 }
 
@@ -90,18 +91,20 @@ async function transitionAction(formData: FormData) {
     if (res.criteria_failures && res.criteria_failures.length > 0) {
       redirect(
         `/app/c/${convId}/tasks/${taskId}?error=${encodeURIComponent(
-          "Criteria not met: " + res.criteria_failures.join("; "),
+          "Some 'done when' checks didn't pass: " +
+            res.criteria_failures.join("; "),
         )}`,
       );
     }
   } catch (err) {
     redirect(
       `/app/c/${convId}/tasks/${taskId}?error=${encodeURIComponent(
-        err instanceof Error ? err.message : "Transition failed.",
+        err instanceof Error ? err.message : "Couldn't change the status.",
       )}`,
     );
   }
   revalidatePath(`/app/c/${convId}/tasks/${taskId}`);
+  revalidatePath("/app", "layout");
   redirect(`/app/c/${convId}/tasks/${taskId}`);
 }
 
@@ -121,11 +124,12 @@ async function assignAction(formData: FormData) {
   } catch (err) {
     redirect(
       `/app/c/${convId}/tasks/${taskId}?error=${encodeURIComponent(
-        err instanceof Error ? err.message : "Assign failed.",
+        err instanceof Error ? err.message : "Couldn't assign the task.",
       )}`,
     );
   }
   revalidatePath(`/app/c/${convId}/tasks/${taskId}`);
+  revalidatePath("/app", "layout");
   redirect(`/app/c/${convId}/tasks/${taskId}`);
 }
 
@@ -140,11 +144,12 @@ async function approveAction(formData: FormData) {
   } catch (err) {
     redirect(
       `/app/c/${convId}/tasks/${taskId}?error=${encodeURIComponent(
-        err instanceof Error ? err.message : "Approval failed.",
+        err instanceof Error ? err.message : "Couldn't approve the task.",
       )}`,
     );
   }
   revalidatePath(`/app/c/${convId}/tasks/${taskId}`);
+  revalidatePath("/app", "layout");
   redirect(`/app/c/${convId}/tasks/${taskId}`);
 }
 
@@ -164,11 +169,12 @@ async function addDepAction(formData: FormData) {
   } catch (err) {
     redirect(
       `/app/c/${convId}/tasks/${taskId}?error=${encodeURIComponent(
-        err instanceof Error ? err.message : "Add dep failed.",
+        err instanceof Error ? err.message : "Couldn't add the blocker.",
       )}`,
     );
   }
   revalidatePath(`/app/c/${convId}/tasks/${taskId}`);
+  revalidatePath("/app", "layout");
   redirect(`/app/c/${convId}/tasks/${taskId}`);
 }
 
@@ -188,11 +194,12 @@ async function removeDepAction(formData: FormData) {
   } catch (err) {
     redirect(
       `/app/c/${convId}/tasks/${taskId}?error=${encodeURIComponent(
-        err instanceof Error ? err.message : "Remove dep failed.",
+        err instanceof Error ? err.message : "Couldn't remove the blocker.",
       )}`,
     );
   }
   revalidatePath(`/app/c/${convId}/tasks/${taskId}`);
+  revalidatePath("/app", "layout");
   redirect(`/app/c/${convId}/tasks/${taskId}`);
 }
 
@@ -209,7 +216,11 @@ async function splitTaskAction(formData: FormData) {
     .map((t) => t.trim())
     .filter((t) => t.length > 0);
   if (titles.length === 0) {
-    redirect(`/app/c/${convId}/tasks/${parentId}?error=at+least+one+title`);
+    redirect(
+      `/app/c/${convId}/tasks/${parentId}?error=${encodeURIComponent(
+        "Please add at least one title.",
+      )}`,
+    );
   }
   if (titles.length > assigneesRaw.length && assigneesRaw.length > 0) {
     // pad with last assignee
@@ -229,11 +240,12 @@ async function splitTaskAction(formData: FormData) {
   } catch (err) {
     redirect(
       `/app/c/${convId}/tasks/${parentId}?error=${encodeURIComponent(
-        err instanceof Error ? err.message : "Split failed.",
+        err instanceof Error ? err.message : "Couldn't split the task.",
       )}`,
     );
   }
   revalidatePath(`/app/c/${convId}/tasks/${parentId}`);
+  revalidatePath("/app", "layout");
   redirect(`/app/c/${convId}/tasks/${parentId}`);
 }
 
@@ -246,7 +258,11 @@ async function createSubtaskAction(formData: FormData) {
   const assignee = String(formData.get("assigned_to_agent_id") ?? "") || null;
   const { myAgentId } = requireUserMember(convId, user.id);
   if (!title) {
-    redirect(`/app/c/${convId}/tasks/${parentId}?error=title+required`);
+    redirect(
+      `/app/c/${convId}/tasks/${parentId}?error=${encodeURIComponent(
+        "Please add a title.",
+      )}`,
+    );
   }
   try {
     createSubtask({
@@ -258,11 +274,12 @@ async function createSubtaskAction(formData: FormData) {
   } catch (err) {
     redirect(
       `/app/c/${convId}/tasks/${parentId}?error=${encodeURIComponent(
-        err instanceof Error ? err.message : "Create subtask failed.",
+        err instanceof Error ? err.message : "Couldn't create the subtask.",
       )}`,
     );
   }
   revalidatePath(`/app/c/${convId}/tasks/${parentId}`);
+  revalidatePath("/app", "layout");
   redirect(`/app/c/${convId}/tasks/${parentId}`);
 }
 
@@ -278,11 +295,12 @@ async function requestChangesAction(formData: FormData) {
   } catch (err) {
     redirect(
       `/app/c/${convId}/tasks/${taskId}?error=${encodeURIComponent(
-        err instanceof Error ? err.message : "Request changes failed.",
+        err instanceof Error ? err.message : "Couldn't send the change request.",
       )}`,
     );
   }
   revalidatePath(`/app/c/${convId}/tasks/${taskId}`);
+  revalidatePath("/app", "layout");
   redirect(`/app/c/${convId}/tasks/${taskId}`);
 }
 
@@ -358,9 +376,9 @@ export default async function TaskDetailPage({
         workspaceCount={workspaces.length}
         openTaskCount={openCount}
         title={t.title}
-        subtitle={`status ${t.status} · owner ${t.owner_agent_id.slice(0, 18)}`}
+        subtitle={`status ${STATUS_LABEL[t.status].text} · owner ${t.owner_agent_id.slice(0, 18)}`}
       />
-      <main className="max-w-4xl mx-auto p-6 grid grid-cols-1 md:grid-cols-[1fr_280px] gap-5">
+      <main className="app-stage-wide grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_320px] gap-5">
         <section className="space-y-4">
           {sp.error ? (
             <div className="callout callout-amber text-[13px]">
@@ -368,7 +386,7 @@ export default async function TaskDetailPage({
             </div>
           ) : null}
 
-          <div className="surface p-4 space-y-2">
+          <div className="module-panel p-4 space-y-2">
             <div className="flex items-center gap-2">
               <span className={STATUS_LABEL[t.status].cls}>
                 {STATUS_LABEL[t.status].text}
@@ -388,18 +406,18 @@ export default async function TaskDetailPage({
             <div className="text-[12px] text-[color:var(--color-ink-soft)]">
               {parseSuccessCriteria(t).length > 0 ? (
                 <>
-                  <b>Success criteria:</b>{" "}
+                  <b>Done when:</b>{" "}
                   <code className="font-mono">
                     {JSON.stringify(parseSuccessCriteria(t))}
                   </code>
                 </>
               ) : (
-                "No success criteria — done = manual close."
+                "No 'done when' checks — someone marks this done by hand."
               )}
             </div>
           </div>
 
-          <div className="surface p-4">
+          <div className="module-panel p-4">
             <div className="font-medium text-[13px] mb-2">Activity</div>
             <ul className="space-y-2 text-[13px]">
               {events.map((e) => {
@@ -438,7 +456,11 @@ export default async function TaskDetailPage({
                               : "tag-violet")
                           }
                         >
-                          {String(payload.role).toUpperCase()}
+                          {payload.role === "pro"
+                            ? "FOR"
+                            : payload.role === "con"
+                            ? "AGAINST"
+                            : String(payload.role).toUpperCase()}
                         </span>
                         <span className="whitespace-pre-wrap">
                           {payload.text as string}
@@ -454,7 +476,9 @@ export default async function TaskDetailPage({
                               : "tag-amber")
                           }
                         >
-                          ⚖ {String(payload.decision)}
+                          ⚖ {payload.decision === "approve"
+                            ? "approved"
+                            : String(payload.decision)}
                         </span>
                         {typeof payload.reason === "string" ? (
                           <span className="whitespace-pre-wrap">
@@ -476,7 +500,7 @@ export default async function TaskDetailPage({
           </div>
 
           {isOwner || isAssignee ? (
-            <form action={commentAction} className="surface p-3 space-y-2">
+            <form action={commentAction} className="module-panel p-3 space-y-2">
               <input type="hidden" name="conversation_id" value={convId} />
               <input type="hidden" name="task_id" value={t.id} />
               <textarea
@@ -494,7 +518,7 @@ export default async function TaskDetailPage({
         </section>
 
         <aside className="space-y-3">
-          <div className="surface p-3">
+          <div className="module-panel p-3">
             <div className="text-[11px] uppercase tracking-wider text-[color:var(--color-ink-soft)] mb-2">
               Assign
             </div>
@@ -524,14 +548,14 @@ export default async function TaskDetailPage({
             ) : null}
           </div>
 
-          <div className="surface p-3">
+          <div className="module-panel p-3">
             <div className="text-[11px] uppercase tracking-wider text-[color:var(--color-ink-soft)] mb-2">
-              Transition
+              Change status
             </div>
             <div className="flex flex-wrap gap-1.5">
               {allowed.length === 0 ? (
                 <p className="text-[12px] text-[color:var(--color-ink-soft)]">
-                  Terminal state.
+                  This task is closed — no further changes.
                 </p>
               ) : (
                 allowed.map((to) => (
@@ -556,7 +580,7 @@ export default async function TaskDetailPage({
           </div>
 
           {t.status === "awaiting_review" && !isOwner ? (
-            <div className="surface p-3 space-y-2">
+            <div className="module-panel p-3 space-y-2">
               <div className="text-[11px] uppercase tracking-wider text-[color:var(--color-ink-soft)]">
                 Review
               </div>
@@ -588,9 +612,9 @@ export default async function TaskDetailPage({
           ) : null}
 
           {sandboxRuns.length > 0 ? (
-            <div className="surface p-3">
+            <div className="module-panel p-3">
               <div className="text-[11px] uppercase tracking-wider text-[color:var(--color-ink-soft)] mb-2">
-                Sandbox runs ({sandboxRuns.length})
+                Command runs ({sandboxRuns.length})
               </div>
               <ul className="space-y-2 text-[11px]">
                 {sandboxRuns.map((r) => (
@@ -608,7 +632,11 @@ export default async function TaskDetailPage({
                             : "tag tag-pink"
                         }
                       >
-                        exit {r.exit_code ?? "?"}
+                        {r.exit_code === 0
+                          ? "passed"
+                          : r.exit_code === null
+                          ? "running"
+                          : `failed (exit ${r.exit_code})`}
                       </span>
                       <span>{r.runtime}</span>
                       <span>·</span>
@@ -620,7 +648,7 @@ export default async function TaskDetailPage({
                     {r.stdout || r.stderr ? (
                       <details className="mt-1">
                         <summary className="cursor-pointer text-[10px] text-[color:var(--color-ink-soft)] select-none">
-                          stdout/stderr
+                          show output
                         </summary>
                         {r.stdout ? (
                           <pre className="text-[10px] font-mono whitespace-pre-wrap mt-1 bg-[color:var(--color-tint-green)] p-1.5 rounded">
@@ -641,9 +669,9 @@ export default async function TaskDetailPage({
           ) : null}
 
           {artifacts.length > 0 ? (
-            <div className="surface p-3">
+            <div className="module-panel p-3">
               <div className="text-[11px] uppercase tracking-wider text-[color:var(--color-ink-soft)] mb-2">
-                Artifacts
+                Outputs
               </div>
               <ul className="space-y-1 text-[12px]">
                 {artifacts.map((a) => {
@@ -680,16 +708,16 @@ export default async function TaskDetailPage({
           {t.workspace_id ? (
             <Link
               href={`/app/c/${convId}/workspace/${t.workspace_id}`}
-              className="surface surface-hover p-3 block text-[12px]"
+              className="module-panel surface-hover p-3 block text-[12px]"
             >
-              ↗ Workspace bound to this task
+              ↗ Workspace linked to this task
             </Link>
           ) : null}
 
           {parent ? (
             <Link
               href={`/app/c/${convId}/tasks/${parent.id}`}
-              className="surface surface-hover p-3 block text-[12px]"
+              className="module-panel surface-hover p-3 block text-[12px]"
             >
               ↑ Parent task:{" "}
               <span className="font-medium">{parent.title}</span>{" "}
@@ -699,7 +727,7 @@ export default async function TaskDetailPage({
             </Link>
           ) : null}
 
-          <div className="surface p-3">
+          <div className="module-panel p-3">
             <div className="text-[11px] uppercase tracking-wider text-[color:var(--color-ink-soft)] mb-2 flex items-center justify-between">
               Blockers ({blockers.length})
               {blockState.blocked ? (
@@ -784,7 +812,7 @@ export default async function TaskDetailPage({
           </div>
 
           {blocking.length > 0 ? (
-            <div className="surface p-3">
+            <div className="module-panel p-3">
               <div className="text-[11px] uppercase tracking-wider text-[color:var(--color-ink-soft)] mb-2">
                 Blocking ({blocking.length})
               </div>
@@ -813,13 +841,13 @@ export default async function TaskDetailPage({
             </div>
           ) : null}
 
-          <div className="surface p-3">
+          <div className="module-panel p-3">
             <div className="text-[11px] uppercase tracking-wider text-[color:var(--color-ink-soft)] mb-2">
               Subtasks ({children.length})
             </div>
             {children.length === 0 ? (
               <p className="text-[12px] text-[color:var(--color-ink-soft)] mb-2">
-                Break into smaller assignable units.
+                Break this into smaller pieces you can assign.
               </p>
             ) : (
               <ul className="space-y-1 text-[12px] mb-2">
@@ -878,7 +906,7 @@ export default async function TaskDetailPage({
 
                 <details className="text-[12px] mt-3">
                   <summary className="cursor-pointer text-[color:var(--color-ink-soft)] select-none">
-                    🔱 Fan out to multiple assignees…
+                    🔱 Create several subtasks at once…
                   </summary>
                   <form action={splitTaskAction} className="space-y-1.5 mt-2">
                     <input type="hidden" name="conversation_id" value={convId} />

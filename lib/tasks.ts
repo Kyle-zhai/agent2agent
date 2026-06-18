@@ -2,7 +2,7 @@ import "server-only";
 import { db } from "./db";
 import { newTaskId } from "./ids";
 import { logAudit } from "./audit";
-import { recordConversationEvent } from "./conversations";
+import { listMembers, recordConversationEvent } from "./conversations";
 import {
   agentCapabilityNames,
   getAgent,
@@ -565,13 +565,21 @@ export async function transitionTaskStatus(input: TransitionInput): Promise<{
   // We can't include the async auto-reviewer dispatch inside the tx because
   // better-sqlite3 transactions are sync — fire it AFTER the tx commits.
   const tx = db().transaction(() => {
-    db()
+    // Compare-and-swap on the prior status: if another worker advanced the task
+    // between our load and now (only possible across processes — better-sqlite3
+    // serializes writers in-process), this affects 0 rows and we abort instead
+    // of double-applying the transition (e.g. two autonomy ticks driving the
+    // same task, or two reviewers racing a transition).
+    const swap = db()
       .prepare(
         `UPDATE tasks
          SET status = ?, result_snapshot_id = ?, updated_at = ?
-         WHERE id = ?`,
+         WHERE id = ? AND status = ?`,
       )
-      .run(finalStatus, resultSnap, now, t.id);
+      .run(finalStatus, resultSnap, now, t.id, t.status);
+    if (swap.changes !== 1) {
+      throw new Error("Task status changed concurrently; please retry.");
+    }
 
     appendEvent(t.id, input.actor_agent_id, "status_change", {
       from: t.status,
@@ -663,6 +671,11 @@ async function evaluateOne(
       if (!snapId) return { ok: false, reason: "diff_pattern: no result snapshot" };
       const snap = getSnapshot(snapId);
       if (!snap) return { ok: false, reason: "diff_pattern: snapshot missing" };
+      // The snapshot id is actor-controlled — bind it to the task's own
+      // workspace or this would read file contents from ANY workspace.
+      if (snap.workspace_id !== task.workspace_id) {
+        return { ok: false, reason: "diff_pattern: snapshot not in task workspace" };
+      }
       const parentId = snap.parent_snapshot_id;
       const diff = fileDiffSummary(parentId, snapId);
       // For pattern matching we concatenate the contents of changed (added or
@@ -699,23 +712,48 @@ async function evaluateOne(
       // required capability.
       const events = listTaskEvents(task.id);
       const approvers = new Set<string>();
+      // Capabilities the approver held AT approval time, snapshotted into the
+      // event payload — so an approval stays valid even if the agent is later
+      // deleted (getAgent → null would otherwise silently drop a valid vote).
+      const snapshotCaps = new Map<string, Set<string>>();
       for (const e of events) {
-        if (e.kind === "approved" && e.actor_agent_id) {
-          approvers.add(e.actor_agent_id);
+        if (e.kind !== "approved") continue;
+        let payload: { approver?: string; capabilities?: string[] } = {};
+        try {
+          payload = JSON.parse(e.payload_json);
+        } catch {
+          /* ignore malformed payload */
+        }
+        // Prefer the live actor; fall back to the snapshotted approver id when
+        // deleteAgentForUser has NULLed actor_agent_id, so a valid historical
+        // approval from a now-deleted agent still counts.
+        const aid = e.actor_agent_id ?? payload.approver;
+        if (!aid) continue;
+        approvers.add(aid);
+        if (Array.isArray(payload.capabilities)) {
+          snapshotCaps.set(aid, new Set(payload.capabilities));
         }
       }
       // closing-actor self-approval is allowed for single-approver scenarios
-      // unless the actor is the owner (avoid trivial self-approval).
+      // unless the actor is the owner OR the assignee — the assignee authored
+      // the work, so counting them defeats independent review (same reason
+      // approveTask blocks owner/assignee self-approval).
       if (
         c.min_approvers === 1 &&
-        ctx.actor_agent_id !== task.owner_agent_id
+        ctx.actor_agent_id !== task.owner_agent_id &&
+        ctx.actor_agent_id !== task.assigned_to_agent_id
       ) {
         approvers.add(ctx.actor_agent_id);
       }
       if (c.approver_capability) {
         for (const a of [...approvers]) {
           const ag = getAgent(a);
-          if (!ag || !agentCapabilityNames(ag).has(c.approver_capability)) {
+          // Prefer the live agent's capabilities; fall back to the snapshot
+          // recorded at approval time when the agent no longer exists.
+          const caps = ag
+            ? agentCapabilityNames(ag)
+            : (snapshotCaps.get(a) ?? new Set<string>());
+          if (!caps.has(c.approver_capability)) {
             approvers.delete(a);
           }
         }
@@ -749,6 +787,13 @@ async function evaluateOne(
           ok: false,
           reason: "test_command: no result_snapshot_id to mount in sandbox",
         };
+      }
+      // The snapshot id is actor-controlled — bind it to the task's own
+      // workspace, or the sandbox would materialize (and run commands over)
+      // files from a workspace the actor may have no access to.
+      const tcSnap = getSnapshot(snapId);
+      if (!tcSnap || tcSnap.workspace_id !== task.workspace_id) {
+        return { ok: false, reason: "test_command: snapshot not in task workspace" };
       }
       try {
         const run = await runSandbox({
@@ -795,8 +840,28 @@ export function approveTask(taskId: string, actorAgentId: string): TaskEvent {
   if (t.owner_agent_id === actorAgentId) {
     throw new Error("Owner cannot self-approve to avoid trivial reviews.");
   }
+  if (t.assigned_to_agent_id === actorAgentId) {
+    throw new Error("Assignee cannot approve their own work.");
+  }
+  // The approver must be a participant in the task's conversation. Without
+  // this, any agent holding any valid API key could record an "approved"
+  // event on an arbitrary task and satisfy a diff_review gate.
+  if (
+    !t.conversation_id ||
+    !listMembers(t.conversation_id).some((m) => m.agent_id === actorAgentId)
+  ) {
+    throw new Error("Only a member of the task's conversation can approve.");
+  }
   touchUpdated(taskId);
-  return appendEvent(taskId, actorAgentId, "approved", {});
+  // Snapshot the approver id + capabilities so this vote survives the agent
+  // later being deleted — deleteAgentForUser NULLs task_events.actor_agent_id,
+  // so without these a capability-filtered diff_review would silently drop a
+  // valid historical approval.
+  const approver = getAgent(actorAgentId);
+  return appendEvent(taskId, actorAgentId, "approved", {
+    approver: actorAgentId,
+    capabilities: approver ? [...agentCapabilityNames(approver)] : [],
+  });
 }
 
 export async function requestChanges(
@@ -809,6 +874,20 @@ export async function requestChanges(
   if (t.status !== "awaiting_review") {
     throw new Error("Task is not awaiting review.");
   }
+  // The actor must be a participant in the task's conversation (owner,
+  // assignee, or a member). This is enforced HERE rather than trusting the
+  // caller — the REST PATCH route previously reached the reviewer branch
+  // below with no authorization at all.
+  const isParty =
+    t.owner_agent_id === actorAgentId ||
+    t.assigned_to_agent_id === actorAgentId ||
+    (!!t.conversation_id &&
+      listMembers(t.conversation_id).some((m) => m.agent_id === actorAgentId));
+  if (!isParty) {
+    throw new Error(
+      "Only a participant in the task's conversation can request changes.",
+    );
+  }
   if (t.owner_agent_id === actorAgentId || t.assigned_to_agent_id === actorAgentId) {
     // Owner or assignee — go through full transition (this can fail criteria
     // gating, but for awaiting_review → changes_requested there are no gates).
@@ -819,10 +898,9 @@ export async function requestChanges(
       comment,
     });
   } else {
-    // Reviewer path: any third-party agent in the conversation can request
-    // changes. We do the state transition directly here (no recursive authz)
-    // and record events. Caller is expected to have already validated the
-    // reviewer is in the conversation / has task.review capability.
+    // Reviewer path: a third-party member of the conversation requests
+    // changes. Membership was already enforced by the isParty check above,
+    // so we do the state transition directly here and record events.
     const tx = db().transaction(() => {
       db()
         .prepare(
@@ -855,6 +933,81 @@ export async function requestChanges(
   return appendEvent(taskId, actorAgentId, "changes_requested", {
     comment: comment.slice(0, COMMENT_MAX),
   });
+}
+
+/**
+ * Break a stalled review loop WITHOUT approving on the model's behalf.
+ *
+ * When an LLM reviewer disputes work whose deterministic acceptance tests pass
+ * — and no other reviewer is eligible (reviewers are one-shot) — the task would
+ * otherwise wedge in awaiting_review forever, since diff_review can never be
+ * satisfied. This records a durable `review_escalated` marker and LEAVES the
+ * task in awaiting_review for a human to approve/close. It never auto-accepts
+ * code; it just stops the infinite coder↔reviewer bounce and routes a
+ * genuinely-passing, model-disputed task to a person.
+ */
+export function escalateReviewToHuman(
+  taskId: string,
+  byAgentId: string | null,
+  reason: string,
+): TaskEvent {
+  const t = getTask(taskId);
+  if (!t) throw new Error("Task not found.");
+  if (t.status !== "awaiting_review") {
+    throw new Error("Can only escalate a task that is awaiting review.");
+  }
+  touchUpdated(taskId);
+  logAudit("task.review_escalated", {
+    agentId: byAgentId,
+    detail: { task_id: taskId, reason: reason.slice(0, 500) },
+  });
+  if (t.conversation_id) {
+    recordConversationEvent(t.conversation_id, "task.status_changed", taskId);
+  }
+  return appendEvent(taskId, byAgentId, "review_escalated", {
+    reason: reason.slice(0, 500),
+  });
+}
+
+/**
+ * Opt-in (A2A_REVIEW_TEST_OVERRIDE=1) escape from a stalled review: when the
+ * deterministic acceptance tests pass but the LLM review is wedged, auto-satisfy
+ * diff_review by recording an AUDITED override approval, then close the task.
+ *
+ * The approval event is explicitly tagged `{ override: true }` so the durable
+ * task-event log tells the honest story — the model disputed, the passing tests
+ * won. NEVER call this unless the caller has confirmed the test_command(s) pass
+ * this round; the final transitionTaskStatus("done") re-runs every criterion as
+ * the real gate, so failing code still cannot slip through.
+ */
+export async function completeViaTestOverride(
+  taskId: string,
+  reviewerAgentId: string,
+): Promise<Task> {
+  const t = getTask(taskId);
+  if (!t) throw new Error("Task not found.");
+  if (t.status !== "awaiting_review") {
+    throw new Error("Can only override a task that is awaiting review.");
+  }
+  const overrider = getAgent(reviewerAgentId);
+  appendEvent(taskId, reviewerAgentId, "approved", {
+    approver: reviewerAgentId,
+    override: true,
+    basis: "deterministic_acceptance_tests_pass",
+    capabilities: overrider ? [...agentCapabilityNames(overrider)] : [],
+  });
+  logAudit("task.review_test_override", {
+    agentId: reviewerAgentId,
+    detail: { task_id: taskId },
+  });
+  const actor = t.assigned_to_agent_id ?? t.owner_agent_id;
+  const res = await transitionTaskStatus({
+    task_id: taskId,
+    to_status: "done",
+    actor_agent_id: actor,
+    result_snapshot_id: t.result_snapshot_id,
+  });
+  return res.task;
 }
 
 // -- v0.10: dependencies & subtasks ------------------------------------------

@@ -9,6 +9,7 @@ import {
   getWorkspace,
   type FileOp,
 } from "@/lib/workspaces";
+import { agentMayUseResource } from "@/lib/grants";
 import { addTaskArtifact, getTask } from "@/lib/tasks";
 import {
   agentKey,
@@ -46,8 +47,16 @@ export async function POST(
   const { id } = await params;
   const ws = getWorkspace(id);
   if (!ws) return jsonError(404, "Workspace not found.");
-  if (!canWrite(ws.id, auth.agent.id)) {
-    return jsonError(403, "Writer/admin role required.");
+  if (
+    !canWrite(ws.id, auth.agent.id) &&
+    !agentMayUseResource({
+      using_agent_id: auth.agent.id,
+      resource_type: "workspace",
+      resource_id: ws.id,
+      required_scope: "write",
+    })
+  ) {
+    return jsonError(403, "Writer/admin role or a write grant is required.");
   }
 
   let body: PatchBody;

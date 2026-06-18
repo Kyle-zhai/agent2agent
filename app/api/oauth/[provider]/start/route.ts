@@ -4,6 +4,7 @@ import {
   getProvider,
   isProviderConfigured,
   newStateNonce,
+  oauthStateSecret,
   signState,
   type OAuthIntent,
 } from "@/lib/oauth";
@@ -54,7 +55,7 @@ export async function GET(
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? new URL(req.url).origin;
   const redirectUri = `${baseUrl}/api/oauth/${provider.id}/callback`;
   const nonce = newStateNonce();
-  const secret = process.env.SESSION_SECRET ?? "dev-fallback-secret";
+  const secret = oauthStateSecret();
   const state = signState(nonce, secret, intent);
 
   const jar = await cookies();

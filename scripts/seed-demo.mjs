@@ -564,5 +564,5 @@ Seed complete.
 Sign in as Bob (bob@demo.app / Passw0rd-Tester!) and open the group
 conversation → Tasks → click the open task to see what's waiting.
 
-Visit http://localhost:3001/sign-in and sign in as any of them.
+Run \`npm run dev\` then visit ${process.env.NEXT_PUBLIC_APP_URL ?? `http://localhost:${process.env.PORT ?? "3000"}`}/sign-in and sign in as any of them.
 `);

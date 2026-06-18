@@ -1,10 +1,10 @@
 ---
-title: Agent 互连握手（v0.14）
+title: Agent 互连握手（v0.14，v0.16 更新）
 type: tech-doc
 status: living
-last_updated: 2026-05-12
-tags: [v0.14, agent_link, 互连, 群协作]
-links: [[INDEX]], [[AGENT_COLLAB]], [[AUTONOMOUS_DESIGN]]
+last_updated: 2026-05-29
+tags: [v0.14, v0.16, agent_link, 互连, 群协作, handoff, grant]
+links: [[INDEX]], [[AGENT_COLLAB]], [[AUTONOMOUS_DESIGN]], [[HANDOFFS]], [[GRANTS]], [[SECURITY]]
 ---
 
 # Agent 互连握手
@@ -94,6 +94,11 @@ stateDiagram-v2
 
 ## 当前语义：advisory（不强制）
 
+> [!warning] v0.15 / v0.16 更新 —— link 仍是 advisory，硬权限搬到了 grant
+> 两件事改变了下面这节的语境，请连读：
+> 1. **handoff-accept 自动建 link**（v0.15，[[HANDOFFS]]）：当一个 handoff 被接受时，`respondHandoff` 在**同一事务**里自动 `requestAgentLink` + `respondAgentLink(accept)` 把这对 agent 互连起来（`lib/handoffs.ts:457-501`）。所以用户走 handoff 流程时**不必再手动到 Members 面板点一次互连** —— 接受 handoff 本身就是足够的协作意图。它能容错"对端已反向发起 pending link"的竞态，并在 declined/revoked 时自动重开。
+> 2. **硬授权原语 = 签名 grant，不是 `areInterconnected`**（v0.16，[[GRANTS]]）：真正 gate 跨用户读/写的是 **scope-bound、HMAC 签名、可撤销/过期的 grant**（见 §"如果需要硬 gate"末尾与 [[SECURITY]] §10）。`areInterconnected` 仍是社交层"我们正式在协作"的信号，但**不是**写权限的真相源。换句话说：link 回答"我们认不认这次协作"，grant 回答"你具体能干什么"。
+
 **v0.14 设计选择**：agent_link 只是"社交信号"，不实际 gate 任何动作。
 
 也就是说：
@@ -106,7 +111,7 @@ stateDiagram-v2
 2. **匹配用户原话**"双方都同意后 agent 互相可以开始协作完成任务" —— 这里的"可以"理解为"明示同意"，是社交意义，而不是技术权限
 3. 让后续 v0.15+ 选择是否升级为硬 gate（参考 [[ROADMAP]]）
 
-如果需要硬 gate（"没 link 就不能跨用户 dispatch task"），可在 `assignTask` / `createTask` / `dispatchToolCall` 三处插 `areInterconnected(caller, target, convId)` 检查；测试 fixture 需要相应升级。
+**v0.16 实际怎么做的**：硬 gate 没有做成"没 link 就不能 dispatch task"那种基于 `areInterconnected` 的检查 —— 而是把强制点放在了**资源访问**上，用签名 [[GRANTS|grant]]。跨用户读/写 workspace 走的是 `agentMayUseResource`（gate "subscription role 或 active grant"），接进了 `lib/tools.ts` 与 workspace REST 读/写路径。`areInterconnected` 留作社交意图信号、不变更既有 v0.5–v0.13 行为；真正"你能干什么"由 grant 的 scope 决定，可被授予方或接收方撤销、可过期。所以**不必**再在 `assignTask` / `createTask` / `dispatchToolCall` 插 `areInterconnected` —— 那条路被 grant enforcement 取代了。
 
 ## 同 user 内部 agent 不允许 link
 

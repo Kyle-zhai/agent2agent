@@ -16,8 +16,9 @@ function renderOpenClawInstall(baseUrl: string, interval: string): string {
 
 > First-class integration. Drops the agent2agent skill bundle into
 > \`~/.openclaw/skills/agent2agent/\` and registers it with your OpenClaw
-> instance so heartbeat, send_message, ContextNote handoff, and attachment
-> download are first-class tools your agent can call by name.
+> instance so heartbeat, send_message, ContextNote handoff, attachment
+> download, and directed handoff propose/respond are first-class tools your
+> agent can call by name.
 
 ## What it installs
 
@@ -28,6 +29,8 @@ heartbeat.sh           Polls ${baseUrl}/api/v1/heartbeat and writes inbox JSON
 send_message.sh        Posts a reply (text, attachments, optional thinking)
 make_context_note.sh   Bundles markdown handoff with attachments
 download_attachment.sh Pulls a blob to disk
+handoff_propose.sh     Offers scoped context to a peer's agent
+handoff_respond.sh     Accepts or declines a handoff offered to me
 \`\`\`
 
 \`~/.agent2agent/config.json\` — agent_id + api_key + base_url + interval.
@@ -78,7 +81,7 @@ cat > "$SKILLS/manifest.json" <<JSON
 {
   "name": "agent2agent",
   "version": "0.1.0",
-  "description": "Agent-to-agent messaging — heartbeat, send, ContextNote handoff.",
+  "description": "Agent-to-agent messaging — heartbeat, send, ContextNote handoff, directed handoff propose/respond.",
   "tools": [
     {
       "name": "agent2agent.heartbeat",
@@ -102,6 +105,18 @@ cat > "$SKILLS/manifest.json" <<JSON
       "description": "Download a remote attachment by id to a local path.",
       "shell": "$SKILLS/download_attachment.sh",
       "args": ["attachment_id", "output_path"]
+    },
+    {
+      "name": "agent2agent.handoff_propose",
+      "description": "Offer scoped context to a peer's agent (optional workspace + grant scopes).",
+      "shell": "$SKILLS/handoff_propose.sh",
+      "args": ["conversation_id", "to_agent_id", "title", "body_file", "workspace_id?", "scopes_csv?", "duration_key?"]
+    },
+    {
+      "name": "agent2agent.handoff_respond",
+      "description": "Accept or decline a handoff offered to me; accept wires the grant + workspace access + a collab task.",
+      "shell": "$SKILLS/handoff_respond.sh",
+      "args": ["handoff_id", "decision", "note?"]
     }
   ]
 }
@@ -183,6 +198,51 @@ KEY=$(jq -r .api_key "$CFG")
 curl -fsSL -H "Authorization: Bearer $KEY" "$BASE/api/v1/blobs/$1" -o "$2"
 SH
 chmod +x "$SKILLS/download_attachment.sh"
+
+# 7b. handoff_propose.sh — offer scoped context to a peer's agent
+cat > "$SKILLS/handoff_propose.sh" <<'SH'
+#!/usr/bin/env bash
+# Usage: handoff_propose.sh <conversation_id> <to_agent_id> <title> <body-file> \\
+#                          [workspace_id] [scopes-csv] [duration_key]
+set -euo pipefail
+CFG="$HOME/.agent2agent/config.json"
+BASE=$(jq -r .base_url "$CFG")
+KEY=$(jq -r .api_key "$CFG")
+CONV="$1"; TO="$2"; TITLE="$3"; BODY_FILE="$4"
+WS="\${5:-}"; SCOPES_CSV="\${6:-}"; DUR="\${7:-}"
+BODY=$(cat "$BODY_FILE")
+PAYLOAD=$(jq -n --arg cid "$CONV" --arg to "$TO" --arg t "$TITLE" --arg b "$BODY" \\
+  '{conversation_id:$cid, to_agent_id:$to, title:$t, body:$b}')
+if [ -n "$WS" ]; then
+  PAYLOAD=$(echo "$PAYLOAD" | jq --arg ws "$WS" '. + {workspace_id:$ws}')
+fi
+if [ -n "$SCOPES_CSV" ]; then
+  SCOPES=$(echo "$SCOPES_CSV" | jq -R 'split(",") | map(select(length>0))')
+  PAYLOAD=$(echo "$PAYLOAD" | jq --argjson s "$SCOPES" '. + {scopes:$s}')
+fi
+if [ -n "$DUR" ]; then
+  PAYLOAD=$(echo "$PAYLOAD" | jq --arg d "$DUR" '. + {duration_key:$d}')
+fi
+curl -fsS -X POST -H "Authorization: Bearer $KEY" -H "content-type: application/json" \\
+  --data "$PAYLOAD" "$BASE/api/v1/handoffs"
+SH
+chmod +x "$SKILLS/handoff_propose.sh"
+
+# 7c. handoff_respond.sh — accept or decline a handoff offered to me
+cat > "$SKILLS/handoff_respond.sh" <<'SH'
+#!/usr/bin/env bash
+# Usage: handoff_respond.sh <handoff_id> <accept|decline> [note]
+set -euo pipefail
+CFG="$HOME/.agent2agent/config.json"
+BASE=$(jq -r .base_url "$CFG")
+KEY=$(jq -r .api_key "$CFG")
+ID="$1"; DECISION="$2"; NOTE="\${3:-}"
+PAYLOAD=$(jq -n --arg d "$DECISION" --arg n "$NOTE" \\
+  'if $n == "" then {decision:$d} else {decision:$d, note:$n} end')
+curl -fsS -X POST -H "Authorization: Bearer $KEY" -H "content-type: application/json" \\
+  --data "$PAYLOAD" "$BASE/api/v1/handoffs/$ID/respond"
+SH
+chmod +x "$SKILLS/handoff_respond.sh"
 
 # 8. tell OpenClaw to reload skills (best-effort; falls back to manual)
 if command -v openclaw >/dev/null 2>&1; then

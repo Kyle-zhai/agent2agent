@@ -2,7 +2,7 @@
 title: Sandbox — test_command 真执行（v0.8）
 type: tech-doc
 status: living
-last_updated: 2026-05-11
+last_updated: 2026-06-11
 tags: [v0.8, sandbox, vercel, child_process, test_command, success_criteria]
 links: [[INDEX]], [[AUTONOMOUS_DESIGN]], [[TASKS]], [[WORKSPACES]], [[SECURITY]]
 ---
@@ -15,6 +15,12 @@ links: [[INDEX]], [[AUTONOMOUS_DESIGN]], [[TASKS]], [[WORKSPACES]], [[SECURITY]]
 ## Runtime 选择
 
 ```ts
+// v0.25 安全反转：隔离是显式 opt-in，绝不默认。优先级：
+//   A2A_SANDBOX_DISABLE=1 → none（一票否决，压过一切）
+//   VERCEL_SANDBOX_TOKEN  → vercel（隔离，推荐）
+//   A2A_SANDBOX_LOCAL=1   → local（本机 bash，无隔离，仅全可信环境）
+//   其余                  → none（skipped，criteria 显式报 ok:false）
+// 旧版默认 local（= 任何能写 task 的人在主机上 RCE）已移除。
 function pickRuntime(): "vercel" | "local" | "none" {
   if (process.env.VERCEL_SANDBOX_TOKEN) return "vercel";
   if (process.env.A2A_SANDBOX_DISABLE === "1") return "none";
@@ -24,8 +30,9 @@ function pickRuntime(): "vercel" | "local" | "none" {
 
 | 环境 | 推荐 | 备注 |
 |---|---|---|
-| 本地 `next dev` | local | 跑你自己仓库里的 demo agent，方便看完整流程 |
-| 自托管单机 | local + `A2A_SANDBOX_DISABLE=1` 慎重开 | 本地 runtime **不是隔离**，运行不信任的命令前必须 disable |
+| 本地 `next dev` | `A2A_SANDBOX_LOCAL=1` → local | 显式开启后跑 demo 流程；本地 runtime **不是隔离** |
+| 自托管单机（全员可信） | `A2A_SANDBOX_LOCAL=1` 慎重开 | 启用即接受"任务写入者可在主机执行命令"；生产启动日志会告警 |
+| 任何有真实/半信任用户的部署 | `VERCEL_SANDBOX_TOKEN`（或保持默认 skipped） | **默认即 skipped**，不配置就不会执行任何命令 |
 | Vercel 生产 | vercel | 设置 `VERCEL_SANDBOX_TOKEN`；microVM 隔离 + 网络 egress 控制 |
 | 不希望让 agent 跑代码 | `A2A_SANDBOX_DISABLE=1` | `test_command` 全部显式 fail（不 silently pass） |
 

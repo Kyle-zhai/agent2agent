@@ -7,6 +7,7 @@ import {
   addTaskComment,
   getTask,
 } from "@/lib/tasks";
+import { mayUseTask } from "@/lib/task-access";
 import {
   agentKey,
   consume,
@@ -34,11 +35,12 @@ export async function POST(
   const { id } = await params;
   const t = getTask(id);
   if (!t) return jsonError(404, "Task not found.");
-  if (
-    t.owner_agent_id !== auth.agent.id &&
-    t.assigned_to_agent_id !== auth.agent.id
-  ) {
-    return jsonError(403, "Not the owner or assignee.");
+  // Same gate as the comment branch of PATCH /tasks/[id] — owner/assignee
+  // bypass, plus an active task comment-grant lets a granted collaborator
+  // chime in. Without it any authenticated agent could comment on any task
+  // by id (IDOR).
+  if (!mayUseTask(t, auth.agent.id, "comment", id)) {
+    return jsonError(403, "Not the owner/assignee and no comment grant for this task.");
   }
   let body: Body;
   try {

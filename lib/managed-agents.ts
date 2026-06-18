@@ -8,13 +8,29 @@ import {
   getAgentOwnedBy,
   listAgentsForUser,
 } from "./agents";
-import { defaultBrainConfig, generateReply, parseBrainConfig, type ConvTurn } from "./brains";
+import {
+  defaultBrainConfig,
+  generateReply,
+  parseBrainConfig,
+  type BrainContext,
+  type ConvTurn,
+} from "./brains";
 import {
   getConversation,
   listMembers,
   listMessages,
   sendMessage,
 } from "./conversations";
+import {
+  applyPatch,
+  canWrite,
+  listFiles,
+  listWorkspacesForConversation,
+  readFileAt,
+  recentWorkspaceChangesForAgent,
+} from "./workspaces";
+import { listTasksForConversation } from "./tasks";
+import { agentMayUseResource } from "./grants";
 import { logAudit } from "./audit";
 import type { Agent, BrainConfig } from "./types";
 import { customAlphabet } from "nanoid";
@@ -294,7 +310,47 @@ export function enqueueRepliesForMessage(
 }
 
 let workerRunning = false;
-const inFlight = new Set<string>();
+
+// Lease-based job claim (v0.20). A worker ATOMICALLY claims one job by
+// stamping a lease; the lease expiring (worker crashed mid-job) makes the job
+// claimable again, so a crash re-delivers instead of permanently losing it.
+// MAX_JOB_ATTEMPTS bounds the retries so a job that crashes the worker every
+// time lands in 'failed' (dead-letter) rather than looping forever.
+export const JOB_LEASE_MS = 60_000;
+export const MAX_JOB_ATTEMPTS = 3;
+
+type ClaimedJob = {
+  id: string;
+  conversation_id: string;
+  agent_id: string;
+  trigger_message_id: string;
+};
+
+/** Atomically claim the next runnable job: a 'pending' one, or a 'running' one
+ *  whose lease expired (its worker died). One UPDATE … WHERE id=(SELECT …)
+ *  RETURNING is race-safe even across processes — SQLite serializes writers,
+ *  so two workers can't claim the same row. */
+export function claimNextJob(now: number): ClaimedJob | null {
+  const row = db()
+    .prepare(
+      `UPDATE reply_jobs
+         SET status = 'running',
+             attempts = attempts + 1,
+             started_at = ?,
+             lease_until = ?
+       WHERE id = (
+         SELECT id FROM reply_jobs
+         WHERE attempts < ?
+           AND (status = 'pending'
+                OR (status = 'running' AND (lease_until IS NULL OR lease_until < ?)))
+         ORDER BY created_at ASC
+         LIMIT 1
+       )
+       RETURNING id, conversation_id, agent_id, trigger_message_id`,
+    )
+    .get(now, now + JOB_LEASE_MS, MAX_JOB_ATTEMPTS, now) as ClaimedJob | undefined;
+  return row ?? null;
+}
 
 export async function runPendingJobs(maxBatch = 5): Promise<void> {
   if (workerRunning) return;
@@ -302,35 +358,10 @@ export async function runPendingJobs(maxBatch = 5): Promise<void> {
   try {
     let processed = 0;
     while (processed < maxBatch) {
-      const job = db()
-        .prepare(
-          `SELECT id, conversation_id, agent_id, trigger_message_id
-           FROM reply_jobs
-           WHERE status = 'pending' AND id NOT IN (${
-             inFlight.size > 0
-               ? Array.from(inFlight)
-                   .map(() => "?")
-                   .join(",")
-               : "''"
-           })
-           ORDER BY created_at ASC LIMIT 1`,
-        )
-        .get(...inFlight) as
-        | {
-            id: string;
-            conversation_id: string;
-            agent_id: string;
-            trigger_message_id: string;
-          }
-        | undefined;
+      const job = claimNextJob(Date.now());
       if (!job) break;
-      inFlight.add(job.id);
-      try {
-        await processJob(job);
-        processed++;
-      } finally {
-        inFlight.delete(job.id);
-      }
+      await processJob(job);
+      processed++;
     }
   } finally {
     workerRunning = false;
@@ -343,13 +374,26 @@ async function processJob(job: {
   agent_id: string;
   trigger_message_id: string;
 }): Promise<void> {
-  const startedAt = Date.now();
-  db()
-    .prepare(
-      `UPDATE reply_jobs SET status = 'running', attempts = attempts + 1,
-       started_at = ? WHERE id = ?`,
-    )
-    .run(startedAt, job.id);
+  // status/attempts/started_at/lease_until were already stamped atomically by
+  // claimNextJob — processJob just runs the work and writes a terminal state.
+
+  // Idempotency guard: if a PRIOR attempt already delivered this job's message
+  // (lease expired after the send committed, then the job was re-claimed),
+  // finalize without sending a second copy. at-least-once delivery, exactly
+  // once observed.
+  const prior = db()
+    .prepare("SELECT sent_message_id FROM reply_jobs WHERE id = ?")
+    .get(job.id) as { sent_message_id: string | null } | undefined;
+  if (prior?.sent_message_id) {
+    db()
+      .prepare(
+        `UPDATE reply_jobs SET status = 'done', finished_at = ?, lease_until = NULL
+         WHERE id = ?`,
+      )
+      .run(Date.now(), job.id);
+    return;
+  }
+
   try {
     const agent = getAgent(job.agent_id);
     if (!agent) throw new Error("agent gone");
@@ -370,26 +414,116 @@ async function processJob(job: {
     const effectiveAgent: Agent = override
       ? { ...agent, persona: override.persona }
       : agent;
-    const out = await generateReply(effectiveAgent, history, cfg);
-    if (!out.text.trim() && !out.thinking.trim()) {
+
+    // Build BrainContext so the agent sees the workspace + open tasks for
+    // this conversation. Without this, the agent's only signal is the chat
+    // history — which produces lots of chatter and zero artifacts (see
+    // scripts/experiments/collab-vs-solo.mjs for the baseline that motivated
+    // this change). For groups with a workspace, the agent can now emit
+    // <write> blocks; processJob extracts them and commits below.
+    const context = buildBrainContext(job.conversation_id, agent.id);
+
+    const out = await generateReply(effectiveAgent, history, cfg, context);
+    if (!out.text.trim() && !out.thinking.trim() && out.artifacts.length === 0) {
       throw new Error("empty reply");
     }
-    sendMessage(job.conversation_id, agent.id, {
-      text: out.text || "(reasoning only — see above)",
-      thinking: out.thinking,
-      kind: "agent_to_agent",
-    });
-    db()
-      .prepare(
-        `UPDATE reply_jobs SET status = 'done', finished_at = ? WHERE id = ?`,
-      )
-      .run(Date.now(), job.id);
+
+    // Apply any artifacts the brain produced. We do this BEFORE sending the
+    // chat message so the workspace.changed event ordering matches "agent
+    // talks about its commit" → "commit visible".
+    if (out.artifacts.length > 0 && context?.workspace) {
+      const ws = context.workspace;
+      // Dedup: drop any artifact whose path already has identical content
+      // to what the brain proposed. We only have the workspace excerpt
+      // (up to 4 KB) so the check is conservative — if the excerpt fully
+      // covers the new content AND matches, treat as a no-op.
+      const dedupedArtifacts = out.artifacts.filter((a) => {
+        const existing = ws.files.find((f) => f.path === a.path);
+        if (!existing || !existing.excerpt) return true;
+        const incoming = a.content.trim();
+        const prev = existing.excerpt.trim();
+        // The excerpt is capped (~4 KB); only treat as a no-op when it fully
+        // matches the proposed content. (A byte-size compare here was dead:
+        // it was AND-ed with this same equality, so it never changed the result.)
+        const isDup = prev === incoming;
+        return !isDup;
+      });
+      // Honor a write GRANT, not just a subscription — a cross-team agent
+      // handed write access via a grant (no local subscription) must still be
+      // able to commit its artifacts, matching the workspace.write tool's gate.
+      const mayWrite =
+        canWrite(ws.id, agent.id) ||
+        agentMayUseResource({
+          using_agent_id: agent.id,
+          resource_type: "workspace",
+          resource_id: ws.id,
+          required_scope: "write",
+        });
+      if (mayWrite && dedupedArtifacts.length > 0) {
+        try {
+          applyPatch({
+            workspace_id: ws.id,
+            agent_id: agent.id,
+            against_rev: ws.head_snapshot_id,
+            ops: dedupedArtifacts.map((a) => ({
+              path: a.path,
+              op: "create" as const,
+              content: a.content,
+            })),
+            commit_message:
+              dedupedArtifacts.length === 1
+                ? dedupedArtifacts[0].commit_message
+                : `${dedupedArtifacts.length} files by ${agent.display_name}`,
+          });
+        } catch (err) {
+          // Patch may fail because of a path validation error or a stale
+          // against_rev. We don't want this to kill the reply — log so an
+          // operator can diagnose, and surface a hint inline.
+          const msg = err instanceof Error ? err.message : String(err);
+          console.warn("brain artifact patch failed", {
+            agentId: agent.id,
+            conversationId: job.conversation_id,
+            workspaceId: ws.id,
+            err: msg,
+          });
+          out.thinking +=
+            `\n(workspace patch failed: ${msg.slice(0, 120)})`;
+        }
+      } else {
+        // Not subscribed as writer/admin — skip patch silently but
+        // surface in thinking so it's visible in the agent reasoning panel.
+        out.thinking += `\n(brain wanted to write ${out.artifacts.length} file(s) but agent lacks workspace writer role)`;
+      }
+    }
+
+    // Send the reply AND mark the job done in ONE transaction, recording the
+    // message id. better-sqlite3 commits all-or-nothing, so a crash leaves the
+    // job either fully pending/running with NO message, or fully done with
+    // exactly one — never the in-between that the lease re-claim turns into a
+    // duplicate. (sendMessage's own transaction nests as a savepoint.)
+    db().transaction(() => {
+      const m = sendMessage(job.conversation_id, agent.id, {
+        text: out.text || "(reasoning only — see above)",
+        thinking: out.thinking,
+        kind: "agent_to_agent",
+      });
+      db()
+        .prepare(
+          `UPDATE reply_jobs SET status = 'done', finished_at = ?, lease_until = NULL,
+           sent_message_id = ? WHERE id = ?`,
+        )
+        .run(Date.now(), m.id, job.id);
+    })();
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    // Business failure is terminal (we don't auto-retry a bad reply). Crashes
+    // that never reach this catch leave the job 'running' with an expired
+    // lease → claimNextJob re-delivers until MAX_JOB_ATTEMPTS. Clearing the
+    // lease here marks this attempt done so a still-valid lease can't reclaim.
     db()
       .prepare(
         `UPDATE reply_jobs SET status = 'failed', finished_at = ?,
-         last_error = ? WHERE id = ?`,
+         last_error = ?, lease_until = NULL WHERE id = ?`,
       )
       .run(Date.now(), msg.slice(0, 280), job.id);
     console.error("reply_job failed", {
@@ -429,22 +563,122 @@ async function processJob(job: {
 }
 
 export function resumeOrphanedJobs(): void {
-  // Anything left in 'running' from a prior process restart is unrecoverable
-  // — mark it failed so the typing indicator clears and the worker doesn't
-  // permanently believe an agent is mid-reply.
+  // v0.20: leases make most orphan recovery automatic — a 'running' job whose
+  // worker died is re-claimable once its lease expires (claimNextJob). On
+  // startup we only need to (1) expire leases immediately so recovery doesn't
+  // wait out the TTL, and (2) dead-letter jobs that already burned all their
+  // attempts (these would otherwise be invisible — never re-claimed, never
+  // terminal). No more blanket-failing every in-flight job.
   const now = Date.now();
-  const result = db()
+  db()
+    .prepare(
+      `UPDATE reply_jobs SET lease_until = ?
+       WHERE status = 'running' AND attempts < ?`,
+    )
+    .run(now - 1, MAX_JOB_ATTEMPTS);
+  const dead = db()
     .prepare(
       `UPDATE reply_jobs SET status = 'failed', finished_at = ?,
-       last_error = 'orphaned: server restarted'
-       WHERE status = 'running'`,
+       last_error = 'gave up after max attempts (worker kept crashing)',
+       lease_until = NULL
+       WHERE status = 'running' AND attempts >= ?`,
     )
-    .run(now);
-  if (result.changes > 0) {
+    .run(now, MAX_JOB_ATTEMPTS);
+  if (dead.changes > 0) {
     console.warn(
-      `reply_jobs: marked ${result.changes} orphaned 'running' jobs as failed on startup`,
+      `reply_jobs: dead-lettered ${dead.changes} job(s) that exhausted ${MAX_JOB_ATTEMPTS} attempts`,
     );
   }
+}
+
+function buildBrainContext(
+  conversationId: string,
+  agentId: string,
+): BrainContext | undefined {
+  // Find the most recently-created workspace tied to this conversation. A
+  // conv can have multiple workspaces — we only enrich with the primary one
+  // (head of the list, which listWorkspacesForConversation already returns
+  // newest-first). Stop early if there's nothing to ground on.
+  const wss = listWorkspacesForConversation(conversationId);
+  const ws = wss[0];
+  let workspaceCtx: BrainContext["workspace"] | undefined;
+  if (ws && ws.head_snapshot_id) {
+    const files = listFiles(ws.head_snapshot_id);
+    const enriched = files.slice(0, 10).map((f) => {
+      // Only include excerpt for small text-y files. Anything > 8KB or
+      // binary-looking is summarised by metadata alone — the brain doesn't
+      // need every byte to reason.
+      let excerpt: string | undefined;
+      if (f.size_bytes <= 8 * 1024 && /\.(md|txt|json|sql|sh|py|ts|tsx|js|jsx|yaml|yml|toml)$/.test(f.path)) {
+        try {
+          const r = readFileAt(ws.head_snapshot_id!, f.path);
+          if (r && !r.missing) {
+            excerpt = r.content.toString("utf8").slice(0, 4 * 1024);
+          }
+        } catch {
+          /* swallow — excerpt is best-effort */
+        }
+      }
+      return {
+        path: f.path,
+        size_bytes: f.size_bytes,
+        excerpt,
+      };
+    });
+    workspaceCtx = {
+      id: ws.id,
+      name: ws.name,
+      files: enriched,
+      head_snapshot_id: ws.head_snapshot_id,
+    };
+  }
+
+  // Surface the most-recent open task assigned to this agent so the brain
+  // can stay goal-anchored across turns instead of drifting with chat.
+  const tasks = listTasksForConversation(conversationId, 20);
+  const myOpenTask = tasks.find(
+    (t) =>
+      t.assigned_to_agent_id === agentId &&
+      t.status !== "done" &&
+      t.status !== "cancelled",
+  );
+  const taskCtx: BrainContext["task"] | undefined = myOpenTask
+    ? {
+        id: myOpenTask.id,
+        title: myOpenTask.title,
+        description: myOpenTask.description,
+      }
+    : undefined;
+
+  if (!workspaceCtx && !taskCtx) return undefined;
+
+  // What peers committed since this agent last spoke — so a managed agent
+  // replying in a room with a workspace reacts to the other side's edits
+  // instead of being blind to them. Window: this agent's last message in
+  // the room (fall back to last 10 min).
+  let peerChanges: BrainContext["peerChanges"];
+  if (workspaceCtx) {
+    const lastMine = db()
+      .prepare(
+        `SELECT created_at FROM messages
+         WHERE conversation_id = ? AND from_agent_id = ?
+         ORDER BY created_at DESC LIMIT 1`,
+      )
+      .get(conversationId, agentId) as { created_at: number } | undefined;
+    const since = lastMine?.created_at ?? Date.now() - 10 * 60_000;
+    const changes = recentWorkspaceChangesForAgent(agentId, since, 8).filter(
+      (c) => c.workspace_id === workspaceCtx!.id,
+    );
+    if (changes.length > 0) {
+      peerChanges = changes.map((c) => ({
+        by: c.created_by_agent_id,
+        commit_message: c.commit_message,
+        files: c.files.map((f) => `${f.status}:${f.path}`),
+      }));
+    }
+  }
+
+  return { workspace: workspaceCtx, task: taskCtx, peerChanges };
 }
 
 function buildHistory(
@@ -452,7 +686,21 @@ function buildHistory(
   selfAgentId: string,
   maxHistory: number,
 ): ConvTurn[] {
-  const recent = listMessages(conversationId, { limit: maxHistory * 2 });
+  // Only show messages from AFTER this agent joined. An agent added mid-thread
+  // was not party to the pre-join backlog; feeding it that history creates false
+  // continuity (and leaks content it never received). Agents present since
+  // creation join before the first message, so they still see everything.
+  const joined = (
+    db()
+      .prepare(
+        "SELECT joined_at FROM conversation_members WHERE conversation_id = ? AND agent_id = ?",
+      )
+      .get(conversationId, selfAgentId) as { joined_at: number } | undefined
+  )?.joined_at;
+  const recent = listMessages(conversationId, {
+    sinceCreatedAt: joined ? joined - 1 : 0,
+    limit: maxHistory * 2,
+  });
   const tail = recent.slice(-maxHistory);
   const memberAgents = listMembers(conversationId)
     .map((m) => getAgent(m.agent_id))
@@ -462,6 +710,7 @@ function buildHistory(
   );
   return tail.map((m) => ({
     agent_id: m.from_agent_id,
+    message_id: m.id,
     display_name: nameById[m.from_agent_id] ?? m.from_agent_id,
     text: m.text,
     thinking: m.thinking || undefined,

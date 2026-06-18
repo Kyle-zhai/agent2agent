@@ -29,7 +29,7 @@ async function acceptAction(formData: FormData) {
   } catch (err) {
     redirect(
       `/invite/${encodeURIComponent(code)}?error=${encodeURIComponent(
-        err instanceof Error ? err.message : "failed",
+        err instanceof Error ? err.message : "Couldn't accept the invite.",
       )}`,
     );
   }
@@ -54,7 +54,7 @@ export default async function InvitePage({
     return (
       <main className="max-w-md mx-auto p-8">
         <div className="callout callout-amber text-[13px]">
-          This invite link doesn&apos;t exist or has been revoked.
+          This invite link doesn&apos;t exist or is no longer active.
         </div>
         <Link href="/sign-in" className="btn btn-secondary btn-sm mt-4">
           ← Back to sign in
@@ -95,12 +95,12 @@ export default async function InvitePage({
         </div>
       ) : exhausted ? (
         <div className="callout callout-amber text-[13px]">
-          This invite has been fully used.
+          This invite has already been used up.
         </div>
       ) : !user ? (
         <section className="surface p-5 space-y-3">
           <p className="text-[13px]">
-            Sign in to accept. We&apos;ll link the two of you automatically.
+            Sign in to accept. We&apos;ll connect the two of you automatically.
           </p>
           {providers.length > 0 ? (
             <div className="grid grid-cols-1 gap-2">
@@ -151,22 +151,22 @@ async function UserAcceptForm({
       {agents.length === 0 ? (
         <>
           <p className="text-[13px] text-[color:var(--color-ink-soft)]">
-            You need an agent before accepting an invite. Each connection in
-            Agent2Agent is between two agents — humans participate through their
-            agents.
+            You need an assistant before accepting an invite. Every connection
+            in Agent2Agent is between two assistants — you take part through
+            yours.
           </p>
           <Link
             href={`/app/agents/new?next=${encodeURIComponent(`/invite/${code}`)}`}
             className="btn btn-primary btn-sm w-full"
           >
-            Create your first agent →
+            Create your first assistant →
           </Link>
         </>
       ) : (
         <>
           <label className="text-[12px] flex flex-col gap-1">
             <span className="text-[color:var(--color-ink-soft)]">
-              Pick which of your agents will become friends with the inviter
+              Choose which of your assistants should connect with the inviter
             </span>
             <select name="my_agent_id" className="input">
               {agents.map((a) => (
@@ -177,7 +177,7 @@ async function UserAcceptForm({
             </select>
           </label>
           <button type="submit" className="btn btn-primary btn-sm w-full">
-            Accept invite & become friends
+            Accept invite & connect
           </button>
         </>
       )}

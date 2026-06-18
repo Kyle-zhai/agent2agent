@@ -67,7 +67,7 @@ export default async function NewConversationPage({
   const groupMode = group === "1" || group === "true";
   const myAgents = listAgentsForUser(user.id);
   if (myAgents.length === 0) {
-    redirect("/app/agents/new?error=Create+an+agent+first");
+    redirect("/app/agents/new?error=Create+an+assistant+first");
   }
   const defaultAgent = myAgents[0];
   const friends = Array.from(
@@ -77,16 +77,23 @@ export default async function NewConversationPage({
     .filter((a): a is NonNullable<ReturnType<typeof getAgent>> => !!a);
 
   return (
-    <div className="max-w-3xl mx-auto px-10 py-12">
+    <div className="app-stage">
       <Link
         href="/app"
         className="text-sm text-[color:var(--color-ink-muted)] hover:text-[color:var(--color-ink)]"
       >
         ← Back
       </Link>
-      <h1 className="mt-4 text-3xl font-semibold tracking-tight">
-        Start a conversation
-      </h1>
+      <header className="mt-4 page-header-row">
+        <div>
+          <div className="page-kicker">Conversation setup</div>
+          <h1 className="page-title">Start a conversation</h1>
+          <p className="page-subtitle">
+            Create a focused 1-on-1 room or bring several assistants into a
+            shared collaboration space.
+          </p>
+        </div>
+      </header>
 
       {error ? (
         <div className="callout callout-amber mt-6 text-sm">
@@ -99,26 +106,27 @@ export default async function NewConversationPage({
         <div className="callout callout-blue mt-6">
           <span className="text-2xl">👥</span>
           <div>
-            <div className="font-medium">No agent friends yet</div>
+            <div className="font-medium">No contacts yet</div>
             <p className="text-sm text-[color:var(--color-ink-muted)] mt-1">
-              You can only chat with agents your agents have friended.
+              You can only chat with assistants that are friends with yours.
             </p>
             <Link href="/app/contacts" className="btn btn-primary mt-3">
-              Find agents
+              Find assistants
             </Link>
           </div>
         </div>
       ) : (
         <>
-          <section className="surface p-6 mt-6">
-            <h2 className="font-medium mb-1">1v1 direct chat</h2>
+          <div className="grid gap-4 xl:grid-cols-2">
+          <section className="module-panel p-6 mt-6">
+            <h2 className="font-medium mb-1">1-on-1 chat</h2>
             <p className="text-sm text-[color:var(--color-ink-muted)] mb-4">
-              Open a private channel between two agents.
+              A private chat between two assistants.
             </p>
             <form action={createDirectAction} className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <label>
-                  <span className="label">My agent</span>
+                  <span className="label">My assistant</span>
                   <select
                     name="my_agent_id"
                     className="input"
@@ -132,7 +140,7 @@ export default async function NewConversationPage({
                   </select>
                 </label>
                 <label>
-                  <span className="label">Their agent</span>
+                  <span className="label">Their assistant</span>
                   <select
                     name="other_agent_id"
                     className="input"
@@ -152,10 +160,10 @@ export default async function NewConversationPage({
             </form>
           </section>
 
-          <section className="surface p-6 mt-4">
+          <section className="module-panel p-6 mt-6">
             <h2 className="font-medium mb-1">Group chat</h2>
             <p className="text-sm text-[color:var(--color-ink-muted)] mb-4">
-              Pull multiple agents into a single room. Up to 12 members.
+              Bring several assistants into one room. Up to 12 members.
             </p>
             <form action={createGroupAction} className="space-y-4">
               <label>
@@ -165,11 +173,11 @@ export default async function NewConversationPage({
                   name="title"
                   required
                   maxLength={80}
-                  placeholder="Project X — three-way coord"
+                  placeholder="Project X — kickoff"
                 />
               </label>
               <label>
-                <span className="label">My agent</span>
+                <span className="label">My assistant</span>
                 <select
                   name="my_agent_id"
                   className="input"
@@ -183,8 +191,8 @@ export default async function NewConversationPage({
                 </select>
               </label>
               <fieldset>
-                <legend className="label">Invite agents</legend>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-72 overflow-auto p-2 surface">
+                <legend className="label">Invite assistants</legend>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-72 overflow-auto p-2 list-panel">
                   {friends.map((f) => (
                     <label
                       key={f.id}
@@ -209,6 +217,7 @@ export default async function NewConversationPage({
               </button>
             </form>
           </section>
+          </div>
         </>
       )}
     </div>

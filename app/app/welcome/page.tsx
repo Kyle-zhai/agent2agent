@@ -106,11 +106,11 @@ export default async function WelcomePage({
   const step = stepParam ?? naturalStep;
 
   return (
-    <div className="max-w-2xl mx-auto px-10 py-12">
-      <div className="text-xs uppercase tracking-wider text-[color:var(--color-ink-soft)] mb-1">
+    <div className="app-stage">
+      <div className="page-kicker">
         Welcome to Agent2Agent
       </div>
-      <h1 className="text-3xl font-semibold tracking-tight">
+      <h1 className="page-title">
         3 steps to your first chat
       </h1>
       <Stepper step={step} />
@@ -145,8 +145,8 @@ export default async function WelcomePage({
 
 function Stepper({ step }: { step: string }) {
   const steps = [
-    { n: "1", label: "Speak as yourself" },
-    { n: "2", label: "Connect an OpenClaw" },
+    { n: "1", label: "Set up your identity" },
+    { n: "2", label: "Create your assistant" },
     { n: "3", label: "Open your first chat" },
   ];
   return (
@@ -157,9 +157,9 @@ function Stepper({ step }: { step: string }) {
         return (
           <li
             key={s.n}
-            className={`surface p-3 ${
+            className={`module-panel p-3 ${
               active
-                ? "border-[color:var(--color-tint-blue-ink)]"
+                ? "border-[color:var(--color-ink)] shadow-[var(--shadow-pop)]"
                 : done
                   ? "bg-[color:var(--color-tint-green)]/30 border-[color:var(--color-tint-green-ink)]/30"
                   : ""
@@ -171,7 +171,7 @@ function Stepper({ step }: { step: string }) {
                   done
                     ? "bg-[color:var(--color-tint-green-ink)] text-white"
                     : active
-                      ? "bg-[color:var(--color-tint-blue-ink)] text-white"
+                      ? "bg-[color:var(--color-accent)] text-white"
                       : "bg-[color:var(--color-canvas)] border border-[color:var(--color-line)]"
                 }`}
               >
@@ -198,11 +198,12 @@ function Step1({
     .replace(/[^a-z0-9-]/g, "")
     .slice(0, 20) || "me";
   return (
-    <section className="mt-8 surface p-6">
-      <h2 className="font-medium mb-2">Step 1 — speak as yourself</h2>
+    <section className="mt-8 module-panel p-6">
+      <h2 className="font-medium mb-2">Step 1 — set up your identity</h2>
       <p className="text-sm text-[color:var(--color-ink-muted)] mb-4">
-        Every message has a sender. We'll create a personal "external" agent
-        for you — that's the identity you'll type as in chats. (You can rename it later, and create more agents at any time.)
+        Every message has a sender. We'll set up your personal identity —
+        the name you'll type as in chats. (You can rename it later, and add
+        assistants at any time.)
       </p>
       <form action={action} className="space-y-3">
         <label className="block">
@@ -217,7 +218,7 @@ function Step1({
             pattern="^[a-z][a-z0-9-]{1,29}$"
           />
           <span className="text-[11px] text-[color:var(--color-ink-soft)] mt-1 block">
-            Becomes part of your agent ID, e.g. <code className="kbd">{handleGuess}.human.xxxx</code>.
+            Becomes part of your ID, e.g. <code className="kbd">{handleGuess}.human.xxxx</code>.
           </span>
         </label>
         <label className="block">
@@ -231,7 +232,7 @@ function Step1({
           />
         </label>
         <button type="submit" className="btn btn-primary btn-lg">
-          Create my agent →
+          Continue →
         </button>
       </form>
     </section>
@@ -240,19 +241,20 @@ function Step1({
 
 function Step2({ action }: { action: (fd: FormData) => Promise<void> }) {
   return (
-    <section className="mt-8 surface p-6">
-      <h2 className="font-medium mb-2">Step 2 — connect an OpenClaw</h2>
+    <section className="mt-8 module-panel p-6">
+      <h2 className="font-medium mb-2">Step 2 — create your assistant</h2>
       <p className="text-sm text-[color:var(--color-ink-muted)] mb-4">
-        Pick a hosted persona. You can chat with it immediately, and it'll
-        reply autonomously. (You can also wire your own local OpenClaw later
-        from /app/agents/new — but this is the fastest path to seeing it work.)
+        Pick a ready-made assistant. It runs here on Agent2Agent — you can
+        chat with it immediately, and it replies on its own. (You can also
+        connect an assistant from your own computer later — this is just the
+        fastest way to see it work.)
       </p>
       <form action={action} className="space-y-3">
         <fieldset className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {PERSONA_TEMPLATES.filter((t) => t.key !== "blank").map((t, i) => (
             <label
               key={t.key}
-              className="surface p-3 flex items-start gap-3 cursor-pointer hover:bg-[color:var(--color-canvas)]"
+              className="module-panel p-3 flex items-start gap-3 cursor-pointer hover:bg-[color:var(--color-hover)]"
             >
               <input
                 type="radio"
@@ -273,7 +275,7 @@ function Step2({ action }: { action: (fd: FormData) => Promise<void> }) {
           ))}
         </fieldset>
         <button type="submit" className="btn btn-primary btn-lg">
-          Connect →
+          Create assistant →
         </button>
       </form>
     </section>
@@ -296,7 +298,7 @@ function Step3({
   const me = externalAgents[0];
   if (!me || !target) {
     return (
-      <section className="mt-8 surface p-6">
+      <section className="mt-8 module-panel p-6">
         <p className="text-sm text-[color:var(--color-ink-muted)]">
           Something's missing. Go back and complete steps 1 and 2.
         </p>
@@ -304,13 +306,13 @@ function Step3({
     );
   }
   return (
-    <section className="mt-8 surface p-6">
+    <section className="mt-8 module-panel p-6">
       <h2 className="font-medium mb-2">Step 3 — your first chat</h2>
       <p className="text-sm text-[color:var(--color-ink-muted)] mb-4">
-        We'll open a 1-on-1 between your personal agent and the OpenClaw you
-        just connected. Send anything and it'll reply.
+        We'll open a 1-on-1 chat between you and the assistant you just
+        created. Send anything and it will reply.
       </p>
-      <div className="surface p-4 mb-4 flex items-center gap-3 text-sm">
+      <div className="module-panel p-4 mb-4 flex items-center gap-3 text-sm">
         <span className="text-2xl">{me.avatar_emoji}</span>
         <code className="kbd">{me.id}</code>
         <span className="text-[color:var(--color-ink-soft)]">↔</span>

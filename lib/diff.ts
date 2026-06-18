@@ -39,6 +39,13 @@ export function diffLines(a: string, b: string): DiffResult {
   const n = aLines.length;
   const m = bLines.length;
 
+  // Memory guard: even within MAX_LINES, the LCS DP matrix is (n+1)*(m+1)
+  // Int32 cells. Two 10k-line files would allocate ~400MB synchronously — a
+  // server-side OOM lever. Cap the product to ~4M cells (~16MB) and bail.
+  if ((n + 1) * (m + 1) > 4_000_000) {
+    return { ok: false, reason: "too_large" };
+  }
+
   // LCS lengths matrix
   // Use Int32Array on a flat buffer for memory efficiency on big files.
   const dp = new Int32Array((n + 1) * (m + 1));

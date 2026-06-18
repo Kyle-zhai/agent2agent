@@ -1,6 +1,6 @@
 export type AgentKind = "external" | "managed";
 
-export type BrainProvider = "mock" | "anthropic" | "openai";
+export type BrainProvider = "mock" | "anthropic" | "openai" | "a2a";
 
 export type BrainConfig = {
   provider: BrainProvider;
@@ -8,15 +8,28 @@ export type BrainConfig = {
   temperature?: number;
   max_history?: number;
   reply_to_self?: boolean;
+  /** provider "a2a" only — JSON-RPC endpoint of the remote A2A agent. */
+  url?: string;
+  /** provider "a2a" only — sent as a Bearer token to the remote endpoint.
+   *  MUST never be echoed in any API response or UI. */
+  auth_token?: string;
 };
 
+// v0.21 — outbound A2A client: three-state JWS verification result for a
+// remote agent card ("unverified" = card carries no signatures; "invalid" =
+// signatures present but none verified against the origin's JWKS).
+export type RemoteCardVerification = "verified" | "unverified" | "invalid";
+
+// v0.16 UI subtraction: 6 framework options → 3. Kept the ones we have
+// real install paths for (generic = anything that can POST JSON,
+// openclaw = our reference integration, claude-code = the one most users
+// pair with). Cursor/codex/hermes were placeholders — historical agents
+// stored with those values still load (the column is just text); we just
+// stop offering them in the creation UI.
 export const SUPPORTED_FRAMEWORKS = [
   "generic",
   "openclaw",
   "claude-code",
-  "cursor",
-  "codex",
-  "hermes",
 ] as const;
 export type AgentFramework = (typeof SUPPORTED_FRAMEWORKS)[number];
 
@@ -37,6 +50,12 @@ export type Agent = {
   last_seen_at: number | null;
   last_message_at: number | null;
   created_at: number;
+  /** v0.21 — JWS verification state of the archived remote card. (The raw
+   *  card JSON itself lives in the agents.a2a_card_json COLUMN as an archive
+   *  — deliberately NOT part of this type or AGENT_COLUMNS: it can be 256KB
+   *  per row and nothing in application logic reads it. Query it directly
+   *  if a future feature needs re-verification or debugging.) */
+  a2a_card_verified?: RemoteCardVerification | null;
 };
 
 export type Conversation = {
@@ -242,6 +261,7 @@ export type TaskEventKind =
   | "approved"
   | "changes_requested"
   | "criteria_failed"
+  | "review_escalated"
   | "debate_argument"
   | "debate_finished";
 
@@ -267,4 +287,70 @@ export type TaskArtifact = {
   ref_id: string;
   added_by_agent_id: string | null;
   added_at: number;
+};
+
+// v0.15 — directed handoffs (user1's agent → user2's agent, with content
+// filtering + double opt-in approval before autonomous collaboration starts).
+
+export type HandoffStatus =
+  | "proposed"
+  | "accepted"
+  | "declined"
+  | "withdrawn"
+  | "completed";
+
+// v0.16 — capability-scoped grants. A signed, scope-bound, time-limited
+// delegation token issued from one user's agent to another's. Inspired by
+// UCAN's "share authority without sharing keys" idea. Each grant lives as
+// a row + an HMAC signature; verification recomputes the signature so
+// tampering breaks the chain. Resource_type/_id pin exactly what is
+// shared (e.g. resource_type="file", resource_id="<workspace_id>:<path>").
+export type GrantScope = "read" | "comment" | "write" | "admin";
+
+export type GrantResourceType =
+  | "workspace"
+  | "file"
+  | "conversation"
+  | "task";
+
+export type SharedGrant = {
+  id: string;
+  from_agent_id: string;
+  from_user_id: string;
+  to_agent_id: string;
+  to_user_id: string;
+  resource_type: GrantResourceType;
+  resource_id: string;
+  scopes_json: string; // JSON GrantScope[]
+  handoff_id: string | null;
+  signature: string;
+  expires_at: number | null;
+  revoked_at: number | null;
+  revoked_reason: string | null;
+  last_used_at: number | null;
+  created_at: number;
+};
+
+export type Handoff = {
+  id: string;
+  conversation_id: string;
+  workspace_id: string | null;
+  from_agent_id: string;
+  from_user_id: string;
+  to_agent_id: string;
+  to_user_id: string;
+  title: string;
+  brief: string;
+  shared_body: string;          // post-filter content (what to_agent can read)
+  private_summary: string;      // human-readable note of what was hidden
+  redaction_count: number;      // # of redacted spans/files
+  attachment_ids_json: string;  // JSON array of attachment ids included
+  task_id: string | null;       // populated when accepted
+  link_id: string | null;       // agent_link id created/used on accept
+  status: HandoffStatus;
+  created_at: number;
+  responded_at: number | null;
+  response_note: string;
+  scopes_json: string; // JSON GrantScope[]
+  duration_key: string; // one of DURATION_PRESETS keys
 };

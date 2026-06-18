@@ -46,7 +46,7 @@ async function resolveAction(formData: FormData) {
     redirect(
       `/app/c/${convId}/workspace/${wsId}/resolve?path=${encodeURIComponent(path)}&my_content=${encodeURIComponent(
         String(formData.get("my_content") ?? ""),
-      )}&error=pick_a_choice`,
+      )}&error=${encodeURIComponent("Please pick one of the three options.")}`,
     );
   }
 
@@ -63,14 +63,14 @@ async function resolveAction(formData: FormData) {
         `/app/c/${convId}/workspace/${wsId}/resolve?path=${encodeURIComponent(path)}` +
           `&my_content=${encodeURIComponent(content!)}` +
           `&error=${encodeURIComponent(
-            `head moved again — re-resolve against ${r.current_head.slice(0, 12)}`,
+            `The files changed again while you were resolving — please redo this against version ${r.current_head.slice(0, 12)}.`,
           )}`,
       );
     }
   } catch (err) {
     redirect(
       `/app/c/${convId}/workspace/${wsId}/resolve?path=${encodeURIComponent(path)}&error=${encodeURIComponent(
-        err instanceof Error ? err.message : "resolve failed",
+        err instanceof Error ? err.message : "Couldn't save the resolution.",
       )}`,
     );
   }
@@ -132,9 +132,9 @@ export default async function ResolveConflictPage({
         workspaceCount={workspaceCount}
         openTaskCount={openTasks}
         title={`Resolve conflict on ${path}`}
-        subtitle={`head moved to ${shortenSha(headRev)} while you were editing`}
+        subtitle={`someone saved a newer version (${shortenSha(headRev)}) while you were editing`}
       />
-      <main className="max-w-5xl mx-auto p-6 space-y-4">
+      <main className="app-stage-wide space-y-4">
         {sp.error ? (
           <div className="callout callout-amber text-[13px]">
             ⚠ {decodeURIComponent(sp.error)}
@@ -143,8 +143,8 @@ export default async function ResolveConflictPage({
 
         <div className="callout callout-amber text-[13px]">
           <div>
-            Someone else committed to <code>{path}</code> while you were editing.
-            Pick how to resolve:
+            Someone else saved changes to <code>{path}</code> while you were
+            editing. Choose what to keep:
           </div>
         </div>
 
@@ -156,34 +156,34 @@ export default async function ResolveConflictPage({
 
           <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Pane
-              title="🟢 Their version (current head)"
+              title="🟢 Their version (latest saved)"
               hint={shortenSha(headRev)}
               content={headContent}
               hideEditor
             />
             <Pane
-              title="🔵 Your version (uncommitted)"
-              hint="local"
+              title="🔵 Your version (not saved yet)"
+              hint="unsaved"
               content={myContent}
               hideEditor
             />
           </section>
 
-          <section className="surface">
+          <section className="module-panel">
             <div className="px-3 py-2 border-b border-[color:var(--color-line)] text-[12px] font-medium">
-              Diff: 🟢 head → 🔵 yours
+              What changed: 🟢 theirs → 🔵 yours
             </div>
             <pre className="text-[12px] font-mono leading-snug overflow-x-auto m-0">
               {yoursVsHead.ok
                 ? yoursVsHead.lines.slice(0, 800).map((l, i) => (
                     <DiffRow key={i} line={l} />
                   ))
-                : `(diff unavailable: ${yoursVsHead.reason})`}
+                : `(comparison unavailable: ${yoursVsHead.reason})`}
             </pre>
           </section>
 
-          <section className="surface p-4 space-y-3">
-            <h2 className="font-medium text-[14px]">Choose your move</h2>
+          <section className="module-panel p-4 space-y-3">
+            <h2 className="font-medium text-[14px]">Choose what to keep</h2>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
               <button
                 type="submit"
@@ -191,7 +191,7 @@ export default async function ResolveConflictPage({
                 value="mine"
                 className="btn btn-primary btn-sm"
               >
-                ⏩ Use mine (overwrite head)
+                ⏩ Keep mine (replace theirs)
               </button>
               <button
                 type="submit"
@@ -207,7 +207,7 @@ export default async function ResolveConflictPage({
                 value="manual"
                 className="btn btn-secondary btn-sm"
               >
-                ✎ Manual merge below
+                ✎ Merge by hand (edit below)
               </button>
             </div>
             <textarea
@@ -217,7 +217,7 @@ export default async function ResolveConflictPage({
                 ancestorContent || headContent + "\n\n// === yours ===\n" + myContent
               }
               className="input text-[12px] font-mono w-full"
-              placeholder="Edit the merged result, then click 'Manual merge'"
+              placeholder="Edit the combined result here, then click 'Merge by hand'"
             />
           </section>
 
@@ -245,7 +245,7 @@ function Pane({
   hideEditor?: boolean;
 }) {
   return (
-    <div className="surface">
+    <div className="module-panel">
       <div className="px-3 py-2 border-b border-[color:var(--color-line)] flex items-center justify-between text-[12px]">
         <span className="font-medium">{title}</span>
         <span className="text-[color:var(--color-ink-soft)] font-mono text-[11px]">

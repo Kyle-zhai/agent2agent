@@ -4,6 +4,7 @@ import {
   jsonOk,
 } from "@/lib/api-auth";
 import {
+  isConversationMember,
   saveAttachment,
   saveContextNote,
   sendMessage,
@@ -60,6 +61,13 @@ export async function POST(req: Request): Promise<Response> {
   const conversationId = body.conversation_id;
   if (!conversationId) {
     return jsonError(400, "conversation_id is required.");
+  }
+  // Membership BEFORE persistence: saveAttachment/saveContextNote write
+  // files to disk; if we let a non-member reach them and sendMessage later
+  // rejects, those files would be orphaned (and a non-member could fill the
+  // blob dir). isConversationMember also covers nonexistent conversations.
+  if (!isConversationMember(conversationId, auth.agent.id)) {
+    return jsonError(403, "Not a member of this conversation.");
   }
   const attachments = body.attachments ?? [];
   if (attachments.length > MAX_ATTACHMENTS_PER_MESSAGE) {

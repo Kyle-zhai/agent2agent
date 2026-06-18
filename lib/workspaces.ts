@@ -9,6 +9,7 @@ import { join, posix } from "node:path";
 import { db } from "./db";
 import { sha256HexOfBuffer } from "./crypto";
 import { newSnapshotId, newWorkspaceId } from "./ids";
+import { merge3, isMergeableText } from "./merge3";
 import { logAudit } from "./audit";
 import { recordConversationEvent } from "./conversations";
 import type {
@@ -319,6 +320,10 @@ export type PatchResult =
       snapshot_id: string;
       parent_snapshot_id: string;
       changed: number;
+      /** Set when against_rev was stale but none of the op paths changed
+       *  between against_rev and head, so the patch was safely replayed on
+       *  top of head (git-style trivial rebase). */
+      rebased_from?: string;
     }
   | {
       ok: false;
@@ -341,10 +346,29 @@ export function applyPatch(input: {
   if (!ws) throw new Error("Workspace not found.");
 
   const tx = db().transaction(() => {
-    const head = ws.head_snapshot_id;
+    // Read head INSIDE the tx (fresh) rather than from the pre-transaction `ws`
+    // object, and run the tx as IMMEDIATE (below) so concurrent patches — even
+    // across processes — observe the true current head. Without this two patches
+    // read the same head, create siblings, and the second UPDATE orphans the
+    // first head pointer.
+    const head =
+      (
+        db()
+          .prepare("SELECT head_snapshot_id FROM workspaces WHERE id = ?")
+          .get(input.workspace_id) as { head_snapshot_id: string | null } | undefined
+      )?.head_snapshot_id ?? null;
     if (!head) throw new Error("Workspace has no head snapshot.");
 
+    let rebasedFrom: string | undefined;
     if (input.against_rev !== head) {
+      // Scope guard: against_rev must belong to THIS workspace. Otherwise a
+      // writer of workspace A could pass a foreign snapshot id and use the
+      // returned conflicting_paths as a cross-workspace content/path-existence
+      // oracle. Mirrors the file GET route's snapshot check.
+      const ar = getSnapshot(input.against_rev);
+      if (!ar || ar.workspace_id !== input.workspace_id) {
+        throw new Error("against_rev not in this workspace.");
+      }
       const yourFiles = listFiles(input.against_rev).reduce(
         (acc, f) => acc.set(f.path, f.content_sha256),
         new Map<string, string>(),
@@ -360,15 +384,81 @@ export function applyPatch(input: {
         const headSha = headFiles.get(norm);
         if (yourSha !== headSha) conflicting.push(norm);
       }
-      // Even ops on previously-absent paths conflict if head added them.
-      const ret: PatchResult = {
-        ok: false,
-        conflict: true,
-        current_head: head,
-        your_against_rev: input.against_rev,
-        conflicting_paths: conflicting,
-      };
-      throw new PatchConflictError(ret);
+      // Same-file conflicts: before giving up to /resolve, try a line-level
+      // three-way merge per path (base=against_rev, yours=patch, theirs=head).
+      // Non-overlapping line edits merge cleanly; a real same-line clash (or
+      // anything we can't merge safely — binary, CRLF, delete) stays a 409.
+      // mergedContent holds the rewritten op content for paths we merged.
+      const mergedContent = new Map<string, string>();
+      const stillConflicting: string[] = [];
+      for (const path of conflicting) {
+        const op = input.ops.find(
+          (o) => normalizeWorkspacePath(o.path) === path,
+        );
+        // Only a create/modify of mergeable text can be auto-merged.
+        if (!op || op.op === "delete") {
+          stillConflicting.push(path);
+          continue;
+        }
+        const yoursStr =
+          typeof op.content === "string"
+            ? op.content
+            : op.content.toString("utf8");
+        const baseFile = readFileAt(input.against_rev, path);
+        const headFile = readFileAt(head, path);
+        // If the file didn't exist at base or head, there's no common
+        // ancestor / current version to merge against — let it 409.
+        if (
+          !baseFile ||
+          baseFile.missing ||
+          !headFile ||
+          headFile.missing
+        ) {
+          stillConflicting.push(path);
+          continue;
+        }
+        const baseStr = baseFile.content.toString("utf8");
+        const theirsStr = headFile.content.toString("utf8");
+        if (
+          !isMergeableText(yoursStr) ||
+          !isMergeableText(baseStr) ||
+          !isMergeableText(theirsStr)
+        ) {
+          stillConflicting.push(path);
+          continue;
+        }
+        const m = merge3(baseStr, yoursStr, theirsStr);
+        if (m.ok) mergedContent.set(path, m.merged);
+        else stillConflicting.push(path);
+      }
+
+      if (stillConflicting.length > 0) {
+        const ret: PatchResult = {
+          ok: false,
+          conflict: true,
+          current_head: head,
+          your_against_rev: input.against_rev,
+          conflicting_paths: stillConflicting,
+        };
+        throw new PatchConflictError(ret);
+      }
+
+      // Everything reconciled: paths that touched OTHER files trivially rebase
+      // (empty intersection), and same-file paths were three-way merged. Apply
+      // the merged content in place, then replay on head below.
+      if (mergedContent.size > 0) {
+        input = {
+          ...input,
+          ops: input.ops.map((o) => {
+            const norm = normalizeWorkspacePath(o.path);
+            const merged = mergedContent.get(norm);
+            return merged !== undefined && o.op !== "delete"
+              ? { ...o, content: merged }
+              : o;
+          }),
+        };
+      }
+      rebasedFrom = input.against_rev;
     }
 
     if (input.ops.length > MAX_FILES_PER_SNAPSHOT) {
@@ -440,12 +530,15 @@ export function applyPatch(input: {
       snapshot_id: snapId,
       parent_snapshot_id: head,
       changed,
+      ...(rebasedFrom ? { rebased_from: rebasedFrom } : {}),
     };
     return result;
   });
 
   try {
-    const res = tx();
+    // IMMEDIATE: take the write lock at BEGIN so the fresh head read above is
+    // authoritative and two concurrent writers can't both advance head.
+    const res = tx.immediate();
     logAudit("workspace.patch", {
       agentId: input.agent_id ?? null,
       detail: {
@@ -489,6 +582,60 @@ class PatchConflictError extends Error {
 
 export function shortenSha(sha: string): string {
   return sha.slice(0, 12);
+}
+
+/** Recent snapshots OTHER agents committed to workspaces this agent is
+ *  subscribed to — the "what did the other side change" feed. Each entry
+ *  carries the per-file diff summary so a heartbeat consumer can see
+ *  "alice modified drafts/spec.md (+1 file)" without another round-trip. */
+export function recentWorkspaceChangesForAgent(
+  agentId: string,
+  sinceMs: number,
+  limit = 20,
+): Array<{
+  workspace_id: string;
+  snapshot_id: string;
+  parent_snapshot_id: string | null;
+  created_by_agent_id: string | null;
+  commit_message: string;
+  task_id: string | null;
+  created_at: number;
+  files: Array<{ path: string; status: "added" | "modified" | "deleted"; size_bytes: number }>;
+}> {
+  const rows = db()
+    .prepare(
+      // parent_snapshot_id IS NOT NULL skips the genesis (workspace-creation)
+      // snapshot — it has no diff and isn't an "edit a peer made".
+      `SELECT s.id, s.workspace_id, s.parent_snapshot_id, s.created_by_agent_id,
+              s.commit_message, s.task_id, s.created_at
+       FROM workspace_snapshots s
+       JOIN workspace_subscriptions sub
+         ON sub.workspace_id = s.workspace_id AND sub.agent_id = ?
+       WHERE s.created_at > ?
+         AND s.parent_snapshot_id IS NOT NULL
+         AND (s.created_by_agent_id IS NULL OR s.created_by_agent_id != ?)
+       ORDER BY s.created_at DESC
+       LIMIT ?`,
+    )
+    .all(agentId, sinceMs, agentId, Math.max(1, Math.min(50, limit))) as Array<{
+    id: string;
+    workspace_id: string;
+    parent_snapshot_id: string | null;
+    created_by_agent_id: string | null;
+    commit_message: string;
+    task_id: string | null;
+    created_at: number;
+  }>;
+  return rows.map((r) => ({
+    workspace_id: r.workspace_id,
+    snapshot_id: r.id,
+    parent_snapshot_id: r.parent_snapshot_id,
+    created_by_agent_id: r.created_by_agent_id,
+    commit_message: r.commit_message,
+    task_id: r.task_id,
+    created_at: r.created_at,
+    files: fileDiffSummary(r.parent_snapshot_id, r.id),
+  }));
 }
 
 export function fileDiffSummary(

@@ -27,6 +27,13 @@ export function teardownTestDb(): void {
 
 export function resetTables(db: { prepare: (sql: string) => { run: () => void } }): void {
   const tables = [
+    "a2a_idempotency",
+    "device_auth_requests",
+    "password_reset_tokens",
+    "email_verification_tokens",
+    "a2a_push_configs",
+    "shared_grants",
+    "handoffs",
     "agent_links",
     "tool_call_requests",
     "invite_redemptions",
@@ -48,6 +55,8 @@ export function resetTables(db: { prepare: (sql: string) => { run: () => void } 
     "messages_fts",
     "message_attachments",
     "messages",
+    "context_notes",
+    "attachments",
     "conversation_events",
     "conversation_state",
     "conversation_personas",

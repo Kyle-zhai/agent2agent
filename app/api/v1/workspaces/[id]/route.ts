@@ -12,6 +12,7 @@ import {
   listSnapshotsForWorkspace,
   listSubscribers,
 } from "@/lib/workspaces";
+import { agentMayUseResource } from "@/lib/grants";
 import {
   agentKey,
   consume,
@@ -37,8 +38,16 @@ export async function GET(
   const { id } = await params;
   const ws = getWorkspace(id);
   if (!ws) return jsonError(404, "Workspace not found.");
-  if (!canRead(ws.id, auth.agent.id)) {
-    return jsonError(403, "Not subscribed to workspace.");
+  if (
+    !canRead(ws.id, auth.agent.id) &&
+    !agentMayUseResource({
+      using_agent_id: auth.agent.id,
+      resource_type: "workspace",
+      resource_id: ws.id,
+      required_scope: "read",
+    })
+  ) {
+    return jsonError(403, "Not subscribed and no read grant for this workspace.");
   }
 
   const head = ws.head_snapshot_id ? getSnapshot(ws.head_snapshot_id) : null;

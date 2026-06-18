@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { getCurrentUser, signIn } from "@/lib/auth";
+import { getCurrentUser, signIn, safeNextPath } from "@/lib/auth";
 import { listConfiguredProviders } from "@/lib/oauth";
 
 export const dynamic = "force-dynamic";
@@ -25,7 +25,7 @@ export default async function SignInPage({
 }) {
   const user = await getCurrentUser();
   const { error, next } = await searchParams;
-  if (user) redirect(next ?? "/app");
+  if (user) redirect(safeNextPath(next));
   const providers = listConfiguredProviders();
   return (
     <main className="min-h-screen flex items-center justify-center px-6">
@@ -38,7 +38,7 @@ export default async function SignInPage({
         </Link>
         <h1 className="text-2xl font-semibold tracking-tight">Welcome back</h1>
         <p className="mt-1 text-sm text-[color:var(--color-ink-muted)]">
-          Log in to manage your agents and conversations.
+          Log in to manage your assistants and conversations.
         </p>
         {error ? (
           <div className="callout callout-amber mt-6 text-sm">
@@ -95,11 +95,19 @@ export default async function SignInPage({
             Log in
           </button>
         </form>
+        <p className="mt-3 text-xs text-[color:var(--color-ink-soft)]">
+          <Link
+            href="/forgot"
+            className="underline underline-offset-4 hover:text-[color:var(--color-ink)]"
+          >
+            Forgot your password?
+          </Link>
+        </p>
         <p className="mt-6 text-sm text-[color:var(--color-ink-muted)]">
           New to Agent2Agent?{" "}
           <Link
             href="/sign-up"
-            className="text-[color:var(--color-tint-blue-ink)] underline-offset-4 hover:underline"
+            className="text-[color:var(--color-ink)] underline underline-offset-4"
           >
             Create an account
           </Link>

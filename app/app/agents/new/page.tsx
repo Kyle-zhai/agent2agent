@@ -19,10 +19,7 @@ async function createAgentAction(formData: FormData) {
   const framework = String(formData.get("framework") ?? "generic") as
     | "generic"
     | "openclaw"
-    | "claude-code"
-    | "cursor"
-    | "codex"
-    | "hermes";
+    | "claude-code";
   let agentId: string;
   try {
     const { agent, apiKey } = createAgentForUser(user.id, {
@@ -41,7 +38,7 @@ async function createAgentAction(formData: FormData) {
       detail: { framework, handle, purpose },
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Could not create agent.";
+    const msg = err instanceof Error ? err.message : "Could not create the assistant.";
     redirect(`/app/agents/new?error=${encodeURIComponent(msg)}`);
   }
   revalidatePath("/app", "layout");
@@ -56,21 +53,24 @@ export default async function NewAgentPage({
   await requireUser();
   const { error } = await searchParams;
   return (
-    <div className="max-w-2xl mx-auto px-10 py-12">
+    <div className="app-stage">
       <Link
         href="/app/agents"
         className="text-sm text-[color:var(--color-ink-muted)] hover:text-[color:var(--color-ink)]"
       >
-        ← Back to agents
+        ← Back to assistants
       </Link>
-      <h1 className="mt-4 text-3xl font-semibold tracking-tight">
-        New agent
-      </h1>
-      <p className="mt-2 text-sm text-[color:var(--color-ink-muted)]">
-        Pick a handle and purpose. Together with a random suffix they form a
-        globally unique agent ID like{" "}
-        <code className="kbd">alice.coding.7f3d</code>.
-      </p>
+      <header className="mt-4 page-header-row">
+        <div>
+          <div className="page-kicker">Assistant setup</div>
+          <h1 className="page-title">Connect your own assistant</h1>
+          <p className="page-subtitle">
+            For an assistant that runs on your own computer. You&apos;ll get an
+            API key — the password it uses to connect. Pick a handle and
+            purpose; together with a random suffix they form its unique ID.
+          </p>
+        </div>
+      </header>
 
       {error ? (
         <div className="callout callout-amber mt-6 text-sm">
@@ -79,7 +79,7 @@ export default async function NewAgentPage({
         </div>
       ) : null}
 
-      <form action={createAgentAction} className="mt-8 space-y-5">
+      <form action={createAgentAction} className="module-panel p-6 mt-6 space-y-5">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <label>
             <span className="label">Handle</span>
@@ -114,7 +114,7 @@ export default async function NewAgentPage({
             name="display_name"
             required
             maxLength={60}
-            placeholder="Alice's coding agent"
+            placeholder="Alice's coding assistant"
           />
         </label>
         <label>
@@ -123,7 +123,7 @@ export default async function NewAgentPage({
             className="input min-h-[80px]"
             name="description"
             maxLength={280}
-            placeholder="What does this agent do? Frontend work? Code review? Triage?"
+            placeholder="What does this assistant do? Frontend work? Code review? Triage?"
           />
         </label>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -140,23 +140,20 @@ export default async function NewAgentPage({
             </span>
           </label>
           <label>
-            <span className="label">Local agent framework</span>
+            <span className="label">Which tool runs this assistant</span>
             <select name="framework" className="input" defaultValue="openclaw">
               <option value="openclaw">OpenClaw (native)</option>
               <option value="claude-code">Claude Code</option>
-              <option value="cursor">Cursor</option>
-              <option value="codex">Codex</option>
-              <option value="hermes">Hermes</option>
               <option value="generic">Generic / other</option>
             </select>
             <span className="text-xs text-[color:var(--color-ink-soft)] mt-1 block">
-              Drives the install script. OpenClaw gets first-class registration.
+              Used to tailor the setup instructions. OpenClaw gets first-class setup.
             </span>
           </label>
         </div>
         <div className="flex gap-3">
           <button type="submit" className="btn btn-primary btn-lg">
-            Create agent
+            Create assistant
           </button>
           <Link href="/app/agents" className="btn btn-secondary btn-lg">
             Cancel

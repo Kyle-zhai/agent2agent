@@ -30,7 +30,11 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={inter.variable}>
-      <body>{children}</body>
+      {/* suppressHydrationWarning silences the mismatch warning when browser
+          extensions (Grammarly, LanguageTool, etc.) inject data-* attributes
+          onto <body> before React hydrates. The mismatch is harmless and is
+          NOT something our app can fix — it's caused by the extension. */}
+      <body suppressHydrationWarning>{children}</body>
     </html>
   );
 }

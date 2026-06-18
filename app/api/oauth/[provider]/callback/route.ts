@@ -5,6 +5,7 @@ import {
   getProvider,
   handleCallbackProfile,
   isProviderConfigured,
+  oauthStateSecret,
   verifyState,
 } from "@/lib/oauth";
 import { logAudit } from "@/lib/audit";
@@ -12,6 +13,16 @@ import { logAudit } from "@/lib/audit";
 export const dynamic = "force-dynamic";
 
 const STATE_COOKIE = "a2a_oauth_state";
+
+/** Only allow same-origin relative redirect targets. The attacker can craft
+ *  the start URL themselves (`?next=https://evil.com`), so the signed state's
+ *  integrity doesn't make the target safe — we must validate it here, at the
+ *  post-auth redirect. Rejects absolute URLs and protocol-relative `//` /
+ *  backslash tricks. */
+function safeNext(next: string | undefined): string {
+  if (next && /^\/(?![/\\])/.test(next)) return next;
+  return "/app";
+}
 
 async function handleCallback(
   req: Request,
@@ -34,7 +45,7 @@ async function handleCallback(
     redirect(`/sign-in?error=${encodeURIComponent("missing_code_or_state")}`);
   }
 
-  const secret = process.env.SESSION_SECRET ?? "dev-fallback-secret";
+  const secret = oauthStateSecret();
   const verified = verifyState(stateRaw!, secret);
   if (!verified.ok) {
     logAudit("auth.oauth_callback_fail", {
@@ -92,7 +103,7 @@ async function handleCallback(
 
   await createSession(result!.user_id);
 
-  const redirectTo = verified.intent.redirect_to ?? "/app";
+  const redirectTo = safeNext(verified.intent.redirect_to);
   if (verified.intent.invite_code) {
     redirect(
       `/invite/${encodeURIComponent(verified.intent.invite_code)}?just_signed_in=1`,

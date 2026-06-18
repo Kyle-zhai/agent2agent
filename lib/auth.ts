@@ -20,7 +20,16 @@ async function clientFingerprint(): Promise<{ ip: string | null; ua: string | nu
   return { ip, ua: h.get("user-agent") };
 }
 
-function validatePassword(p: string): void {
+/** Clamp a post-auth `?next=` redirect to a SAME-ORIGIN relative path, so
+ *  `/sign-in?next=https://evil.com` can't bounce a user off-site after login
+ *  (open redirect). Mirrors safeNext() in the OAuth callback: must start with
+ *  a single "/" and not "//" or "/\". Anything else → "/app". */
+export function safeNextPath(next: string | undefined): string {
+  return next && /^\/(?![/\\])/.test(next) ? next : "/app";
+}
+
+// Exported so scripts/reset-password.ts enforces the exact same policy.
+export function validatePassword(p: string): void {
   if (p.length < 10) {
     throw new Error("Password must be at least 10 characters.");
   }
@@ -55,14 +64,17 @@ export async function signUp(
 ): Promise<User> {
   const fp = await clientFingerprint();
   const rl = consume(`signup:ip:${fp.ip ?? "anon"}`, RATE_LIMITS.signup);
-  if (!rl.allowed) {
+  // Global cap a spoofed x-forwarded-for can't rotate around (constant key).
+  const rlGlobal = consume("signup:global", RATE_LIMITS.signupGlobal);
+  if (!rl.allowed || !rlGlobal.allowed) {
+    const r = !rlGlobal.allowed ? rlGlobal : rl;
     logAudit("rate_limit.exceeded", {
       ip: fp.ip,
       userAgent: fp.ua,
-      detail: { route: "signup" },
+      detail: { route: "signup", scope: !rlGlobal.allowed ? "global" : "ip" },
     });
     throw new Error(
-      `Too many sign-up attempts. Try again in ${rl.retryAfterSeconds}s.`,
+      `Too many sign-up attempts. Try again in ${r.retryAfterSeconds}s.`,
     );
   }
   const cleanEmail = email.trim().toLowerCase();
@@ -103,14 +115,18 @@ export async function signUp(
 export async function signIn(email: string, password: string): Promise<User> {
   const fp = await clientFingerprint();
   const rl = consume(`signin:ip:${fp.ip ?? "anon"}`, RATE_LIMITS.signin);
-  if (!rl.allowed) {
+  // Global cap a spoofed x-forwarded-for can't rotate around. (signin also has
+  // per-account lockout below; this just bounds total attempt volume.)
+  const rlGlobal = consume("signin:global", RATE_LIMITS.signinGlobal);
+  if (!rl.allowed || !rlGlobal.allowed) {
+    const r = !rlGlobal.allowed ? rlGlobal : rl;
     logAudit("rate_limit.exceeded", {
       ip: fp.ip,
       userAgent: fp.ua,
-      detail: { route: "signin" },
+      detail: { route: "signin", scope: !rlGlobal.allowed ? "global" : "ip" },
     });
     throw new Error(
-      `Too many sign-in attempts. Try again in ${rl.retryAfterSeconds}s.`,
+      `Too many sign-in attempts. Try again in ${r.retryAfterSeconds}s.`,
     );
   }
   const cleanEmail = email.trim().toLowerCase();

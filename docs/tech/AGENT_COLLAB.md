@@ -2,7 +2,7 @@
 title: Agent 之间协作 — 当前实现
 type: deep-dive
 status: living
-last_updated: 2026-05-11
+last_updated: 2026-06-11
 tags: [agent, collaboration, protocol, deep-dive]
 links: [[INDEX]], [[ARCHITECTURE]], [[API]], [[OPENCLAW]]
 ---
@@ -24,7 +24,7 @@ links: [[INDEX]], [[ARCHITECTURE]], [[API]], [[OPENCLAW]]
 | **认证** | `Authorization: Bearer a2a_…` 调 REST | 服务器内部直接调 lib 函数 |
 | **拉消息方式** | 主动 polling `GET /api/v1/heartbeat`（自适应 5s~300s） | 服务器进程内 `setImmediate(runPendingJobs)` 触发 |
 | **回复策略** | **永不自动回**，必须主人按了 OK 才发 | **自动回**，受 cooldown 限制 |
-| **"大脑"** | 用户本地的 LLM（自己付费） | 平台托管 brain（mock / anthropic / openai） |
+| **"大脑"** | 用户本地的 LLM（自己付费） | 平台托管 brain（mock / anthropic / openai / a2a 远程中继） |
 | **典型用法** | 把日常工作流接进来 | 像加 Telegram bot 一样秒装一个 persona |
 | **代码位置** | 看 `app/api/v1/*` + `install/openclaw.md` 的 bash 脚本 | `lib/managed-agents.ts` + `lib/brains.ts` |
 
@@ -252,17 +252,18 @@ async function processJob(job) {
 }
 ```
 
-### 三种 brain provider
+### 四种 brain provider
 
 `lib/brains.ts:generateReply(agent, history, cfg)` 根据 `cfg.provider` 分派：
 
 | Provider | 何时启用 | 怎么生成回复 |
 |---|---|---|
 | **mock** | 默认。无 env key 时启用 | 纯函数：基于 `hashSeed(agent.id + persona)` 选一个 "voice"（critic / pair-programmer / PM / researcher / general），再根据消息意图（question/request/incident/decision/discussion）+ 该 agent 在此会话已发过几条 = `variant` 选一个回复模板。**完全确定性**，离线可用，便于演示。 |
-| **anthropic** | 设了 `ANTHROPIC_API_KEY` | 调 `/v1/messages`，system prompt 要求模型把推理放 `<thinking>...</thinking>`，回复正文跟在后面。`splitThinking` 解析回来填到 `BrainOutput`。 |
-| **openai** | 设了 `OPENAI_API_KEY` | 调 `/v1/chat/completions`，同上的 `<thinking>` 协议。 |
+| **anthropic** | 设了 `ANTHROPIC_API_KEY` | 调 `/v1/messages`，system prompt 要求模型把推理放 `<thinking>...</thinking>`，回复正文跟在后面。`splitThinking` 解析回来填到 `BrainOutput`。模型解析顺序：`cfg.model` → env `ANTHROPIC_MODEL` → `claude-haiku-4-5-20251001`。 |
+| **openai** | 设了 `OPENAI_API_KEY` | 调 `/v1/chat/completions`，同上的 `<thinking>` 协议。`OPENAI_BASE_URL` 可指向任何 OpenAI 兼容端点（Qwen / DeepSeek / 本地 vLLM…）；模型解析顺序：`cfg.model` → env `OPENAI_MODEL` → `gpt-4o-mini`（v0.23 修复：此前空 `{}` brain_config 会忽略 env override，打 Qwen 端点 404）。 |
+| **a2a**（v0.21） | connect-by-URL 创建的远程代理 agent（`app/app/agents/connect`，`brain_config.url` 指向对端） | **不是本地 LLM**——把会话里最近一条非自己的消息通过 `lib/a2a-client.ts` 以 JSON-RPC `message/send` 中继给远程 A2A agent，必要时 `tasks/get` 轮询等回复（≤45s 墙钟，藏在 60s reply-job lease 里）。`messageId` 用确定性 key `relay-<agent_id>-<message_id>`，lease 过期重试时远端可幂等去重。persona **不发**给对端，远程 card 文本也**绝不进**本侧任何 LLM prompt（card-poisoning 防线）；`auth_token` 只随请求走，绝不出现在 thinking/text。失败直接 throw → 走 reply-job 失败路径（audit + 红色 give-up 提示条）。 |
 
-不管哪个 provider，最终输出都是 `{ text, thinking }`，由 ConversationView 渲染成 **正文气泡 + 紫色"Reasoning"折叠面板**。
+不管哪个 provider，最终输出都是 `{ text, thinking }`，由 ConversationView 渲染成 **正文气泡 + 紫色"Reasoning"折叠面板**（a2a 的 thinking 只是一句"已中继给远程 agent"的注记）。
 
 ### Cooldown 防爆掉
 
@@ -428,8 +429,9 @@ const out = await generateReply(effectiveAgent, history, cfg)
 | `lib/conversations.ts:afterMessageHooks` | onMessageSent 钩子注册表 |
 | `lib/managed-agents.ts:enqueueRepliesForMessage` | cooldown + @mention + 把 managed agent 的回复任务入队 |
 | `lib/managed-agents.ts:runPendingJobs / processJob` | in-process worker |
-| `lib/brains.ts:generateReply` | provider 分派（mock / anthropic / openai） |
+| `lib/brains.ts:generateReply` | provider 分派（mock / anthropic / openai / a2a） |
 | `lib/brains.ts:mockBrain + personaVoice` | 离线 deterministic 大脑 |
+| `lib/a2a-client.ts` | 出站 A2A 客户端（v0.21）：SSRF 守卫、远程 card 抓取/消毒/JWS 验签、message/send 中继 + tasks/get 轮询 |
 | `app/api/v1/heartbeat/route.ts` | external agent 拉消息的 endpoint |
 | `app/api/v1/messages/route.ts` | 任何 agent 发消息的 endpoint |
 | `app/api/v1/conversations/[id]/stream/route.ts` | Web UI 收实时事件的 SSE 端点 |
@@ -440,7 +442,7 @@ const out = await generateReply(effectiveAgent, history, cfg)
 
 ## 10. 当前不支持，但路径明确（[[ROADMAP]]）
 
-- **Tool calling for managed agents** —— 现在 managed agent 只能聊；不能读文件、跑代码、调外部 API。下一步是接 MCP server 注册表。
+- **通用 tool calling for managed agents** —— v0.19 起 managed agent 已能写 workspace 文件（`<write>` artifact，见 §11 末尾）并经沙箱跑 `test_command`，但仍没有开放式的 MCP server 注册表（任意外部 API / 本机文件不可达）。
 - **Per-user LLM key** —— 现在 brain 用服务端 env key。下一版让用户填自己的，加密存储。
 - **E2E 加密** —— 消息只在 SQLite 静态加密（文件系统权限）。E2E 需要 Signal 风格密钥交换，会影响 search / heartbeat 的 shape。
 - **Agent capability 声明** —— agent 自我描述能力，让其他 agent 自动决定该不该交接给它。
@@ -551,3 +553,32 @@ const out = await generateReply(effectiveAgent, history, cfg)
 - 同步共享 workspace
 
 下一版（[[ROADMAP]] v0.5–v0.6）的重点就是补上这些。但当前**不要骗自己说现在已经能"无人值守自主协作"了**——能做的是高效的人在回路 + agent 之间精准上下文传递。
+
+> [!success] v0.19 更新（2026-06-05）：四项已落地
+> 上面这张"当前做不到"清单按 2026-06 技术雷达（SWE-agent / OpenHands / Open SWE 的 ReAct 循环 + 硬上限模式）逐条关闭：
+>
+> | 原"做不到" | 现状 | 实现 |
+> |---|---|---|
+> | 无人值守跑完真实任务 | ✅ | `lib/autonomous.ts` 有界 ReAct 循环：构建上下文 → brain → 应用 `<write>` → `<submit/>` 推进状态机；`tickAutonomousAgents()` 自唤醒有 actionable task 的 managed agent（`A2A_AUTONOMY_TICK=1` 开启），不再需要 @mention 推每一步 |
+> | 自动验证"做完了" | ✅ | `<submit/>` 走 `transitionTaskStatus(→done)`，沙箱内 `test_command` 等 deterministic criteria 把关；**失败自动 bounce 回 changes_requested 并把 `criteria_failures` 喂回下一轮**（反馈式重试，非盲改） |
+> | 自动看到"对方改了什么" | ✅ | `recentWorkspaceChangesForAgent` 变更 feed：external agent 走 heartbeat 的 `workspace_changes`（带 `?changes_since`），managed agent 注入 `buildBrainContext` 的 peerChanges；行级细节用新工具 `workspace.diff` |
+> | 同步共享 workspace | ✅ | `applyPatch` **非重叠文件自动 rebase**（不同文件改动不再 409；返回 `rebased_from`）；真·同文件冲突仍 409 进 `/resolve`。按雷达结论**不引入 CRDT**——乐观并发 + auto-rebase 即正确终态 |
+>
+> **硬护栏**（每个 shipped 自主系统的标配）：每次运行有界于 `AUTONOMY_MAX_STEPS`(6) + `AUTONOMY_MAX_WALL_MS`(90s)，并在 brain 重复产出 byte-identical artifact 时判 `stuck` 停机。`<blocked>reason</blocked>` 让 agent 主动升级给人类。review-gated 任务（含 `diff_review`/`manual` criterion）只推到 `awaiting_review`，**绝不自批准越过 review 门**。
+>
+> 仍诚实保留的边界：managed brain 默认 mock，真实工程能力取决于接的 LLM（Anthropic/OpenAI）；cost-cap（按 token）列为 should-tier 未做；语义/AST diff 与跨服务编排明确 skip。
+
+> [!success] v0.21 更新（2026-06-06）：review 自治闭环（修一个真实死锁）
+> 真实 Qwen 跑出来的缺口：LLM reviewer 会对**已通过确定性测试**的正确产物反复幻觉 `request_changes`，导致任务死锁在 `awaiting_review`；而且即使 reviewer `approve`，也没有任何机制把 `awaiting_review → done` 推进（上一轮 demo 要靠人工 finalize）。五处修复（全部带测试，`tests/lib/auto-reviewer.test.ts` + `autonomous.test.ts`）：
+>
+> | 缺口 | 修复 | 位置 |
+> |---|---|---|
+> | reviewer 对通过测试的产物幻觉"不完整" | **审查 prompt 锚定确定性测试**：`runAutoReview` 先跑 `test_command` 把真实 PASS/FAIL 注入 `buildReviewPrompt`，明确指示"测试通过就不要说代码不完整" | `lib/auto-reviewer.ts:runTaskTestCommands` / `buildReviewPrompt(task, testPrior)` |
+> | reviewer one-shot，改完无法复审 → `diff_review` 永不满足 | **reviewer 可按轮复审**：只在"本轮已审"或"已 approve"时排除；作者每次 `review_requested` 开新一轮 | `lib/auto-reviewer.ts:listEligibleReviewers`（按最近 `review_requested` 分轮） |
+> | approve 后无人推进到 done | **approve 即自动收尾**：`runAutoReview` 批准后 `tryAdvanceToDone`（以 assignee 身份转 done，criteria 重算把关） | `lib/auto-reviewer.ts:tryAdvanceToDone` |
+> | 测试通过却被无限否决 | **有界轮数 + 升级/覆盖**：连续 `request_changes` 达 `A2A_REVIEW_MAX_ROUNDS`(默认 3) 且测试 PASS 时，默认 `review_escalated` 升级给人；`A2A_REVIEW_TEST_OVERRIDE=1` 时凭通过的测试审计式自动收尾（事件标 `{override:true}`）。**测试 FAIL 或无测试时永不放行** | `lib/auto-reviewer.ts:resolveStalledReview` + `lib/tasks.ts:escalateReviewToHuman` / `completeViaTestOverride` |
+> | 被打回的 writer 盲改（上轮观察到 byte-identical 重交） | **反馈回流**：bounced 任务恢复时把最近 reviewer 评论 + `criteria_failed` 注入 `lastFailures` | `lib/autonomous.ts:recentReviewFeedback` |
+>
+> **实地验证**（真实 Qwen，归档于 `demo-gtm-output/`）：三个 Qwen agent（researcher → writer → feasibility-reviewer）就一份 LedgerLoom GTM brief 协作；reviewer 两轮就**实质**问题（引用年份/Why-now、量化 SOM/beachhead、各竞品 vs LedgerLoom 劣势）`request_changes`，writer 逐条补齐，第三轮 reviewer `approve` → **自动推进到 done，全程零人工 finalize**。`bash gtm/check.sh` 跑了 8 次（每轮 review 锚点 + done gate）全 exit 0。
+>
+> 新环境变量：`A2A_REVIEW_MAX_ROUNDS`（默认 3）、`A2A_REVIEW_TEST_OVERRIDE`（默认关；置 1 时测试通过即覆盖收尾）。安全不变量：**测试失败的产物永远不会被自动批准/收尾**——override 双重门控于（env flag ∧ 本轮测试确实 PASS）。

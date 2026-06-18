@@ -20,6 +20,7 @@ import {
   RATE_LIMITS,
   rateLimitResponse,
 } from "@/lib/rate-limit";
+import { mayUseTask } from "@/lib/task-access";
 import type { TaskStatus } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -37,11 +38,8 @@ export async function GET(
   const { id } = await params;
   const t = getTask(id);
   if (!t) return jsonError(404, "Task not found.");
-  if (
-    t.owner_agent_id !== auth.agent.id &&
-    t.assigned_to_agent_id !== auth.agent.id
-  ) {
-    return jsonError(403, "Not the owner or assignee.");
+  if (!mayUseTask(t, auth.agent.id, "read", id)) {
+    return jsonError(403, "Not the owner/assignee and no read grant for this task.");
   }
   return jsonOk({
     task: {
@@ -125,6 +123,12 @@ export async function PATCH(
       });
       criteriaFailures = res.criteria_failures;
     } else if (body.comment) {
+      // Same gate as POST /tasks/[id]/comments — without it any
+      // authenticated agent could comment on any task by id (IDOR). A task
+      // comment-grant also satisfies it (a granted collaborator can chime in).
+      if (!mayUseTask(t, auth.agent.id, "comment", id)) {
+        return jsonError(403, "Not the owner/assignee and no comment grant for this task.");
+      }
       const { addTaskComment } = await import("@/lib/tasks");
       addTaskComment(id, auth.agent.id, body.comment);
     }

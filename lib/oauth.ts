@@ -1,5 +1,11 @@
 import "server-only";
-import { randomBytes, createHash, timingSafeEqual } from "node:crypto";
+import {
+  randomBytes,
+  createHash,
+  timingSafeEqual,
+  createPublicKey,
+  verify as cryptoVerify,
+} from "node:crypto";
 import { db } from "./db";
 import { newOAuthIdentityId, newUserId } from "./ids";
 import { logAudit } from "./audit";
@@ -184,6 +190,56 @@ const github: ProviderConfig = {
   },
 };
 
+// Verify an Apple id_token: RS256 signature against Apple's published JWKS,
+// plus issuer / audience / expiry. Returns the verified claims, or throws.
+// Without this an attacker could mint a token with any victim's `sub` and be
+// signed in as them, since `sub` is the sole identity key.
+async function verifyAppleIdToken(
+  idToken: string,
+  expectedAud: string,
+  ctx: OAuthCtx,
+): Promise<Record<string, unknown>> {
+  const parts = idToken.split(".");
+  if (parts.length !== 3) throw new Error("apple id_token malformed");
+  const header = JSON.parse(
+    Buffer.from(parts[0], "base64url").toString("utf8"),
+  ) as { alg?: string; kid?: string };
+  if (header.alg !== "RS256") throw new Error("apple id_token unexpected alg");
+  if (!header.kid) throw new Error("apple id_token missing kid");
+
+  const jwksRes = await ctx.fetch("https://appleid.apple.com/auth/keys");
+  if (!jwksRes.ok) throw new Error(`apple jwks fetch ${jwksRes.status}`);
+  const jwks = (await jwksRes.json()) as {
+    keys?: Array<{ kty: string; kid: string; n: string; e: string }>;
+  };
+  const jwk = (jwks.keys ?? []).find((k) => k.kid === header.kid);
+  if (!jwk) throw new Error("apple id_token signing key not found");
+
+  const pubKey = createPublicKey({
+    key: { kty: jwk.kty, n: jwk.n, e: jwk.e },
+    format: "jwk",
+  });
+  const signed = Buffer.from(`${parts[0]}.${parts[1]}`);
+  const sig = Buffer.from(parts[2], "base64url");
+  if (!cryptoVerify("RSA-SHA256", signed, pubKey, sig)) {
+    throw new Error("apple id_token signature invalid");
+  }
+
+  const claims = JSON.parse(
+    Buffer.from(parts[1], "base64url").toString("utf8"),
+  ) as Record<string, unknown>;
+  if (claims.iss !== "https://appleid.apple.com") {
+    throw new Error("apple id_token bad issuer");
+  }
+  const aud = claims.aud;
+  const audOk =
+    aud === expectedAud || (Array.isArray(aud) && aud.includes(expectedAud));
+  if (!audOk) throw new Error("apple id_token bad audience");
+  const exp = typeof claims.exp === "number" ? claims.exp : 0;
+  if (exp * 1000 <= Date.now()) throw new Error("apple id_token expired");
+  return claims;
+}
+
 const apple: ProviderConfig = {
   id: "apple",
   display_name: "Apple",
@@ -226,20 +282,20 @@ const apple: ProviderConfig = {
       raw: j,
     };
   },
-  async fetch_profile({ token }) {
-    // Apple returns user info as a JWT in id_token, not a userinfo endpoint.
+  async fetch_profile({ token, ctx }) {
+    // Apple returns identity as a signed JWT (id_token), not a userinfo
+    // endpoint. The signature + iss/aud/exp MUST be verified before trusting
+    // `sub`, which is the sole key used to resolve the A2A account.
     const idToken = String((token.raw as { id_token?: string }).id_token ?? "");
-    const parts = idToken.split(".");
-    let claims: Record<string, unknown> = {};
-    if (parts.length === 3) {
-      try {
-        claims = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
-      } catch {
-        /* leave empty */
-      }
+    const expectedAud = process.env.A2A_OAUTH_APPLE_CLIENT_ID ?? "";
+    if (!idToken || !expectedAud) {
+      throw new Error("apple id_token or client id missing");
     }
+    const claims = await verifyAppleIdToken(idToken, expectedAud, ctx);
+    const sub = String(claims.sub ?? "");
+    if (!sub) throw new Error("apple id_token has no subject");
     return {
-      provider_user_id: String(claims.sub ?? ""),
+      provider_user_id: sub,
       display_name: typeof claims.email === "string" ? claims.email : "Apple user",
       email: typeof claims.email === "string" ? claims.email : null,
       avatar_url: null,
@@ -401,6 +457,21 @@ export type OAuthIntent = {
 
 export function newStateNonce(): string {
   return randomBytes(24).toString("base64url");
+}
+
+/** Secret used to HMAC-sign the OAuth `state` parameter. Fail closed in
+ *  production: the old `?? "dev-fallback-secret"` literal is public, so an
+ *  attacker could forge state and inject intent (account takeover). Refuse to
+ *  sign/verify with it in prod; dev keeps the literal for zero-config local. */
+export function oauthStateSecret(): string {
+  const s = process.env.SESSION_SECRET;
+  if (s) return s;
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "SESSION_SECRET must be set in production to sign OAuth state. Set a random 32-byte secret.",
+    );
+  }
+  return "dev-fallback-secret";
 }
 
 export function signState(nonce: string, secret: string, intent: OAuthIntent): string {

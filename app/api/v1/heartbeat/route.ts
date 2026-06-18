@@ -10,7 +10,11 @@ import {
   parseRequiredCapabilities,
   parseSuccessCriteria,
 } from "@/lib/tasks";
-import { listWorkspacesForAgent } from "@/lib/workspaces";
+import {
+  listWorkspacesForAgent,
+  recentWorkspaceChangesForAgent,
+} from "@/lib/workspaces";
+import { listPendingHandoffsToUser } from "@/lib/handoffs";
 import { consume, RATE_LIMITS, agentKey, rateLimitResponse } from "@/lib/rate-limit";
 import type { Task } from "@/lib/types";
 
@@ -61,6 +65,20 @@ export async function GET(req: Request): Promise<Response> {
     myTasks.filter((t) => t.status === "assigned").length,
   );
   const myWorkspaces = listWorkspacesForAgent(agent.id);
+  // Handoffs a peer proposed to THIS agent's owner, awaiting accept/decline.
+  // The agent-driven equivalent of the web Inbox's pending-handoffs row: the
+  // local agent can now see "someone is offering me scoped context" and act
+  // on it via POST /api/v1/handoffs/{id}/respond.
+  const pendingHandoffs = listPendingHandoffsToUser(agent.owner_user_id);
+  // "What did the others change" feed: peers' snapshots in my workspaces
+  // since ?changes_since=<ms epoch> (default: the last 10 minutes — wide
+  // enough to bridge the slowest adaptive heartbeat interval of 300s).
+  const sinceRaw = Number(new URL(req.url).searchParams.get("changes_since"));
+  const changesSince =
+    Number.isFinite(sinceRaw) && sinceRaw > 0
+      ? sinceRaw
+      : Date.now() - 10 * 60_000;
+  const workspaceChanges = recentWorkspaceChangesForAgent(agent.id, changesSince);
   const taskSummary = (t: Task) => ({
     id: t.id,
     title: t.title,
@@ -90,6 +108,23 @@ export async function GET(req: Request): Promise<Response> {
       head_snapshot_id: w.head_snapshot_id,
       conversation_id: w.conversation_id,
       head_url: `${baseUrl}/api/v1/workspaces/${w.id}`,
+    })),
+    // Line-level detail: POST /api/v1/tools/invoke
+    //   { tool: "workspace.diff", args: { workspace_id, to_rev: snapshot_id } }
+    workspace_changes: workspaceChanges,
+    pending_handoffs: pendingHandoffs.map((h) => ({
+      id: h.id,
+      conversation_id: h.conversation_id,
+      from_agent_id: h.from_agent_id,
+      title: h.title,
+      brief: h.brief,
+      shared_body: h.shared_body,
+      redaction_count: h.redaction_count,
+      workspace_id: h.workspace_id,
+      scopes: JSON.parse(h.scopes_json || "[]"),
+      duration_key: h.duration_key,
+      created_at: h.created_at,
+      respond_url: `${baseUrl}/api/v1/handoffs/${h.id}/respond`,
     })),
     pending_messages: pending.map((p) => ({
       delivery_id: p.delivery_id,
@@ -129,6 +164,8 @@ export async function GET(req: Request): Promise<Response> {
       "Use POST /api/v1/messages to reply (with conversation_id; optional kind=agent_to_agent).",
       "pending_tasks: each one assigned to you that isn't done/cancelled. Use task_update.sh to move it through the state machine.",
       "subscribed_workspaces: each workspace you can read/write. Use workspace_read.sh / workspace_patch.sh.",
+      "workspace_changes: snapshots OTHER agents committed since your last heartbeat (per-file added/modified/deleted). Pass ?changes_since=<ms> next time; call the workspace.diff tool for line-level detail.",
+      "pending_handoffs: a peer is offering you scoped context. Surface to your owner; with their OK, POST {decision:'accept'|'decline'} to respond_url. Accept wires the grant + workspace access + a collab task automatically. Propose your own via POST /api/v1/handoffs.",
     ],
   });
 }

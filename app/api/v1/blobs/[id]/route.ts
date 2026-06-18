@@ -21,10 +21,26 @@ export async function GET(
   if (!allowed) return jsonError(403, "Forbidden.");
 
   const bytes = readAttachmentBytes(att);
+  // XSS hardening: att.mime_type is attacker-controlled (a member can upload
+  // text/html or image/svg+xml that survives content validation). Serving
+  // those `inline` on our own origin executes script. Only render a small
+  // allowlist of safe types inline; everything else is forced to download as
+  // an opaque octet-stream. `nosniff` blocks MIME-sniffing escalation.
+  const RENDER_SAFE = new Set([
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "application/pdf",
+  ]);
+  const safe = RENDER_SAFE.has(att.mime_type);
+  const contentType = safe ? att.mime_type : "application/octet-stream";
+  const disposition = safe ? "inline" : "attachment";
   return new Response(new Uint8Array(bytes), {
     headers: {
-      "content-type": att.mime_type,
-      "content-disposition": `inline; filename="${encodeURIComponent(att.filename)}"`,
+      "content-type": contentType,
+      "content-disposition": `${disposition}; filename="${encodeURIComponent(att.filename)}"`,
+      "x-content-type-options": "nosniff",
       "cache-control": "private, max-age=3600",
     },
   });

@@ -17,6 +17,33 @@ export const RATE_LIMITS = {
   apiWorkspaceRead: { capacity: 240, refillPerSecond: 4 },
   apiWorkspacePatch: { capacity: 30, refillPerSecond: 30 / 60 },
   apiTaskWrite: { capacity: 60, refillPerSecond: 60 / 60 },
+  // Device-auth: creation is rare (a handful per onboarding); polling is a
+  // 5s loop for ≤15 min, so allow a sustained ~1 poll/2s per client.
+  deviceAuthStart: { capacity: 5, refillPerSecond: 5 / 60 },
+  deviceAuthPoll: { capacity: 30, refillPerSecond: 0.5 },
+  // Human-side user_code lookup/approval on /app/device. The code space is
+  // 28^8 but a patient enumerator could still probe for live pendings (and
+  // approving a guessed code binds the victim's device to the attacker's
+  // account) — 10/min per IP shuts that down while a fat-fingered human
+  // retyping their code never notices.
+  deviceLookup: { capacity: 10, refillPerSecond: 10 / 60 },
+  // Password-reset requests: cap how fast one IP can trigger reset emails to
+  // arbitrary addresses (mail-bomb / enumeration probe). Generous for humans
+  // (3/min) — the per-address effect is bounded anyway since each request is
+  // enumeration-safe and tokens are one-time.
+  passwordReset: { capacity: 3, refillPerSecond: 3 / 60 },
+  // Global (non-IP) caps that a spoofed x-forwarded-for CANNOT bypass — the
+  // per-IP buckets above are only as trustworthy as the proxy chain. signup
+  // has no per-identity backstop (unlike signin's account lockout), so the
+  // global cap is its main defense against header-rotation enumeration /
+  // account-flooding. Tune to expected legit volume.
+  signupGlobal: { capacity: 30, refillPerSecond: 30 / 60 },
+  signinGlobal: { capacity: 120, refillPerSecond: 120 / 60 },
+  passwordResetGlobal: { capacity: 30, refillPerSecond: 30 / 60 },
+  // deviceLookup's global backstop: an enumerator rotating IPs (or spoofing
+  // x-forwarded-for past a naive proxy) gets capped here regardless. 60/min
+  // across ALL users is far above legit device-approval volume.
+  deviceLookupGlobal: { capacity: 60, refillPerSecond: 60 / 60 },
 } as const satisfies Record<string, RateLimitConfig>;
 
 export type RateLimitResult = {

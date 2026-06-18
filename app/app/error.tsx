@@ -19,7 +19,8 @@ export default function AppError({
         Something went wrong here
       </h1>
       <p className="mt-2 text-[color:var(--color-ink-muted)]">
-        {error.message || "Unexpected error."}
+        {error.message ||
+          "Something unexpected happened. Trying again usually fixes it."}
         {error.digest ? (
           <>
             {" "}

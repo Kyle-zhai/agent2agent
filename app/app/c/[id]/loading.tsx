@@ -1,6 +1,6 @@
 export default function ConvLoading() {
   return (
-    <div className="h-screen flex flex-col">
+    <div className="h-full flex flex-col">
       <header className="px-5 py-3 border-b border-[color:var(--color-line)] bg-[color:var(--color-paper)]">
         <div className="skeleton-line h-5 w-40" />
         <div className="skeleton-line h-3 w-24 mt-1.5" />

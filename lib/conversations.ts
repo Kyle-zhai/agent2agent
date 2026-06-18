@@ -68,6 +68,16 @@ function isMember(conversationId: string, agentId: string): boolean {
   return !!row;
 }
 
+/** Public membership probe for routes/actions that persist files BEFORE
+ *  calling sendMessage — check membership first so a rejected send can't
+ *  leave orphaned attachment/context-note files on disk. */
+export function isConversationMember(
+  conversationId: string,
+  agentId: string,
+): boolean {
+  return isMember(conversationId, agentId);
+}
+
 function userOwnsAnyMemberAgent(
   conversationId: string,
   userId: string,
@@ -711,8 +721,14 @@ export function listReactions(messageIds: string[]): Map<string, ReactionAggrega
   return out;
 }
 
+// v0.16 UI subtraction: 12 reactions → 5 most-used. Three thumbs (yes/no/
+// thinking), two action signals (done/blocked). Keeps the palette one row
+// on mobile and removes the visual decision-fatigue of picking from a sea
+// of similar emoji. Backwards-compat: older messages may still carry
+// reactions from the larger set — the renderer just shows whatever was
+// saved.
 export const REACTION_EMOJIS = [
-  "👍", "👎", "❤️", "😂", "😮", "😢", "🎉", "🚀", "✅", "❌", "🤔", "🔥",
+  "👍", "👎", "🤔", "✅", "🚧",
 ] as const;
 export type ReactionEmoji = (typeof REACTION_EMOJIS)[number];
 const ALLOWED_REACTIONS = new Set<string>(REACTION_EMOJIS);
@@ -938,12 +954,20 @@ export function addGroupMember(
     throw new Error("Add as friend first.");
   }
   const now = Date.now();
+  // Anchor the new member's read cursor at the latest existing message so the
+  // backlog they never saw isn't counted as unread (a NULL last_read_message_id
+  // is treated as "read from time 0", inflating unread to the whole history).
+  const latest = db()
+    .prepare(
+      "SELECT id FROM messages WHERE conversation_id = ? ORDER BY created_at DESC, id DESC LIMIT 1",
+    )
+    .get(conversationId) as { id: string } | undefined;
   db()
     .prepare(
-      `INSERT INTO conversation_members (conversation_id, agent_id, role, joined_at)
-       VALUES (?, ?, 'member', ?)`,
+      `INSERT INTO conversation_members (conversation_id, agent_id, role, joined_at, last_read_message_id)
+       VALUES (?, ?, 'member', ?, ?)`,
     )
-    .run(conversationId, newMemberId, now);
+    .run(conversationId, newMemberId, now, latest?.id ?? null);
   db()
     .prepare(
       `INSERT INTO conversation_events (conversation_id, kind, ref_id, created_at)
@@ -1053,11 +1077,16 @@ export function listConversationsWithState(userId: string): Array<{
         : 0;
       const u = db()
         .prepare(
+          // deleted_at IS NULL — tombstoned messages must not count as
+          // unread (the user can't see them, so the badge would never clear).
+          // Exclude ANY of this user's own agents (not just the viewing agent):
+          // a human's own managed agent replying must not show as unread to that
+          // human, since they authored both sides.
           `SELECT COUNT(*) AS n FROM messages
-           WHERE conversation_id = ? AND created_at > ?
-             AND from_agent_id != ?`,
+           WHERE conversation_id = ? AND created_at > ? AND deleted_at IS NULL
+             AND from_agent_id NOT IN (SELECT id FROM agents WHERE owner_user_id = ?)`,
         )
-        .get(c.id, lastReadCreated, myAgentRow.agent_id) as { n: number };
+        .get(c.id, lastReadCreated, userId) as { n: number };
       unread = u.n;
     }
     const wsCount = (

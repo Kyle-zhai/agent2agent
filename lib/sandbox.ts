@@ -1,3 +1,13 @@
+// Sandbox runner for task success_criteria (test_command) and review priors.
+//
+// SECURITY: the "local" runtime executes task-author-controlled commands via
+// `bash -c` ON THE HOST as the server user. It is NOT an isolation boundary
+// and must never be reachable by default — anyone with task-write access
+// would get remote code execution on the server. Runtime selection is
+// therefore strictly opt-in (see pickRuntime): isolated Vercel Sandbox when
+// VERCEL_SANDBOX_TOKEN is set, the local host shell ONLY when the operator
+// explicitly sets A2A_SANDBOX_LOCAL=1, and "skipped" otherwise (criteria
+// report skipped — they never silently pass).
 import "server-only";
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
@@ -39,13 +49,17 @@ export const MAX_OUTPUT_BYTES = 256 * 1024;
 // -------------------------------------------------------------------------
 
 function pickRuntime(): "vercel" | "local" | "none" {
-  if (process.env.VERCEL_SANDBOX_TOKEN) return "vercel";
+  // Explicit kill-switch beats everything, including a configured Vercel
+  // token (back-compat with deployments that disable runs outright).
   if (process.env.A2A_SANDBOX_DISABLE === "1") return "none";
-  // Local fallback is intentionally available in dev / self-host so the
-  // success_criteria.test_command flow can be demoed end-to-end. It is
-  // NOT a real isolation boundary; production deployments should set
-  // VERCEL_SANDBOX_TOKEN and never reach this branch.
-  return "local";
+  if (process.env.VERCEL_SANDBOX_TOKEN) return "vercel";
+  // The local runner is `bash -c` ON THE HOST — no isolation whatsoever.
+  // It exists so dev / self-host operators who fully trust every task
+  // writer can demo the success_criteria.test_command flow end-to-end,
+  // and it requires an explicit opt-in. The default is "none" (criteria
+  // report "skipped"); an unsandboxed host shell must never be implicit.
+  if (process.env.A2A_SANDBOX_LOCAL === "1") return "local";
+  return "none";
 }
 
 // -------------------------------------------------------------------------
@@ -89,14 +103,17 @@ export async function runSandbox(req: SandboxRequest): Promise<SandboxResult> {
         stderr: "",
         exit_code: null,
         duration_ms: 0,
-        reason: "A2A_SANDBOX_DISABLE=1 — runs disabled in this deployment.",
+        reason:
+          process.env.A2A_SANDBOX_DISABLE === "1"
+            ? "A2A_SANDBOX_DISABLE=1 — runs disabled in this deployment."
+            : "No sandbox runtime configured — set VERCEL_SANDBOX_TOKEN (isolated) or A2A_SANDBOX_LOCAL=1 (unisolated host shell, dev only).",
       };
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     result = {
       id,
-      runtime: runtime === "vercel" ? "vercel" : "local",
+      runtime: runtime === "none" ? "skipped" : runtime,
       stdout: "",
       stderr: msg,
       exit_code: -1,
@@ -142,7 +159,8 @@ function truncate(s: string): string {
 }
 
 // -------------------------------------------------------------------------
-// Local child_process — dev / self-host fallback
+// Local child_process — explicit opt-in only (A2A_SANDBOX_LOCAL=1).
+// Runs on the host with no isolation; see the security note at file top.
 // -------------------------------------------------------------------------
 
 async function runOnLocalChildProcess(

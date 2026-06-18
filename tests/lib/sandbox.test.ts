@@ -24,12 +24,18 @@ before(() => {
   setupTestDb();
   _resetDbForTests();
   Date.now = () => NOW;
+  // The local runtime is opt-in (security: unsandboxed host shell). Tests
+  // that exercise it must enable it explicitly; make sure no ambient Vercel
+  // token diverts runs to the network either.
+  process.env.A2A_SANDBOX_LOCAL = "1";
+  delete process.env.VERCEL_SANDBOX_TOKEN;
 });
 
 after(() => {
   Date.now = RealDateNow;
   _resetDbForTests();
   teardownTestDb();
+  delete process.env.A2A_SANDBOX_LOCAL;
 });
 
 beforeEach(() => {
@@ -205,5 +211,200 @@ describe("sandbox local runtime", () => {
     } finally {
       delete process.env.A2A_SANDBOX_DISABLE;
     }
+  });
+});
+
+describe("runtime selection — the host shell is opt-in, never implicit", () => {
+  it("default (no sandbox env at all) → skipped, command never executes", async () => {
+    delete process.env.A2A_SANDBOX_LOCAL;
+    try {
+      const a = seedAgent("usr_a", "alpha");
+      const t = createTask({ title: "x", owner_agent_id: a.id });
+      const run = await runSandbox({
+        cmd: "echo should-not-run",
+        snapshot_id: null,
+        task_id: t.id,
+        initiated_by_agent_id: a.id,
+      });
+      assert.equal(run.runtime, "skipped");
+      assert.equal(run.exit_code, null);
+      assert.equal(run.stdout, "");
+      assert.ok(
+        (run.reason ?? "").includes("No sandbox runtime configured"),
+        `reason should explain the skip, got: ${run.reason}`,
+      );
+      // The persisted row must record the skip too (user-visible history).
+      const rows = listSandboxRunsForTask(t.id);
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0].runtime, "skipped");
+    } finally {
+      process.env.A2A_SANDBOX_LOCAL = "1"; // restore suite default
+    }
+  });
+
+  it("A2A_SANDBOX_LOCAL=1 → local runtime actually runs the command", async () => {
+    process.env.A2A_SANDBOX_LOCAL = "1";
+    const a = seedAgent("usr_a", "alpha");
+    const t = createTask({ title: "x", owner_agent_id: a.id });
+    const run = await runSandbox({
+      cmd: "echo opted-in",
+      snapshot_id: null,
+      task_id: t.id,
+      initiated_by_agent_id: a.id,
+      timeout_ms: 5000,
+    });
+    assert.equal(run.runtime, "local");
+    assert.equal(run.exit_code, 0);
+    assert.ok(run.stdout.includes("opted-in"));
+  });
+
+  it("A2A_SANDBOX_DISABLE=1 beats A2A_SANDBOX_LOCAL=1 → skipped", async () => {
+    process.env.A2A_SANDBOX_LOCAL = "1";
+    process.env.A2A_SANDBOX_DISABLE = "1";
+    try {
+      const a = seedAgent("usr_a", "alpha");
+      const t = createTask({ title: "x", owner_agent_id: a.id });
+      const run = await runSandbox({
+        cmd: "echo still-nope",
+        snapshot_id: null,
+        task_id: t.id,
+        initiated_by_agent_id: a.id,
+      });
+      assert.equal(run.runtime, "skipped");
+      assert.ok(
+        (run.reason ?? "").includes("A2A_SANDBOX_DISABLE"),
+        `reason should name the kill-switch, got: ${run.reason}`,
+      );
+    } finally {
+      delete process.env.A2A_SANDBOX_DISABLE;
+    }
+  });
+});
+
+describe("criterion snapshot must belong to the task's workspace", () => {
+  it("test_command rejects a snapshot from a DIFFERENT workspace (cross-workspace read)", async () => {
+    const owner = seedAgent("usr_o", "owner");
+    const bob = seedAgent("usr_b", "bob");
+    setAgentCapabilities(bob.id, "usr_b", [
+      { name: "workspace.write", version: "1" },
+    ]);
+    const wsTask = createWorkspace({
+      name: "task-ws",
+      conversation_id: null,
+      created_by_agent_id: owner.id,
+    });
+    // A second workspace bob CAN write — its snapshot must still be unusable
+    // as the result of a task bound to wsTask.
+    const wsOther = createWorkspace({
+      name: "other-ws",
+      conversation_id: null,
+      created_by_agent_id: bob.id,
+    });
+    const r = applyPatch({
+      workspace_id: wsOther.id,
+      agent_id: bob.id,
+      against_rev: wsOther.head_snapshot_id!,
+      ops: [{ path: "secrets.txt", op: "create", content: "exit 0" }],
+    });
+    if (!r.ok) return assert.fail("seed patch");
+
+    db()
+      .prepare(
+        "INSERT INTO workspace_subscriptions (workspace_id, agent_id, role, created_at) VALUES (?, ?, 'writer', ?)",
+      )
+      .run(wsTask.id, bob.id, NOW);
+    const t = createTask({
+      title: "x",
+      owner_agent_id: owner.id,
+      assigned_to_agent_id: bob.id,
+      workspace_id: wsTask.id,
+      required_capabilities: ["workspace.write"],
+      success_criteria: [{ type: "test_command", cmd: "true" }],
+    });
+    await transitionTaskStatus({
+      task_id: t.id,
+      to_status: "in_progress",
+      actor_agent_id: bob.id,
+    });
+    await transitionTaskStatus({
+      task_id: t.id,
+      to_status: "awaiting_review",
+      actor_agent_id: bob.id,
+    });
+    const res = await transitionTaskStatus({
+      task_id: t.id,
+      to_status: "done",
+      actor_agent_id: bob.id,
+      result_snapshot_id: r.snapshot_id, // snapshot of wsOther, NOT wsTask
+    });
+    assert.equal(res.task.status, "changes_requested");
+    assert.ok(
+      (res.criteria_failures ?? []).some((f) =>
+        f.includes("snapshot not in task workspace"),
+      ),
+      `expected workspace-binding failure, got: ${JSON.stringify(res.criteria_failures)}`,
+    );
+  });
+
+  it("diff_pattern rejects a snapshot from a DIFFERENT workspace", async () => {
+    const owner = seedAgent("usr_o", "owner");
+    const bob = seedAgent("usr_b", "bob");
+    setAgentCapabilities(bob.id, "usr_b", [
+      { name: "workspace.write", version: "1" },
+    ]);
+    const wsTask = createWorkspace({
+      name: "task-ws-2",
+      conversation_id: null,
+      created_by_agent_id: owner.id,
+    });
+    const wsOther = createWorkspace({
+      name: "other-ws-2",
+      conversation_id: null,
+      created_by_agent_id: bob.id,
+    });
+    const r = applyPatch({
+      workspace_id: wsOther.id,
+      agent_id: bob.id,
+      against_rev: wsOther.head_snapshot_id!,
+      ops: [{ path: "note.md", op: "create", content: "TODO done" }],
+    });
+    if (!r.ok) return assert.fail("seed patch");
+
+    db()
+      .prepare(
+        "INSERT INTO workspace_subscriptions (workspace_id, agent_id, role, created_at) VALUES (?, ?, 'writer', ?)",
+      )
+      .run(wsTask.id, bob.id, NOW);
+    const t = createTask({
+      title: "x",
+      owner_agent_id: owner.id,
+      assigned_to_agent_id: bob.id,
+      workspace_id: wsTask.id,
+      required_capabilities: ["workspace.write"],
+      success_criteria: [{ type: "diff_pattern", required: ["TODO done"] }],
+    });
+    await transitionTaskStatus({
+      task_id: t.id,
+      to_status: "in_progress",
+      actor_agent_id: bob.id,
+    });
+    await transitionTaskStatus({
+      task_id: t.id,
+      to_status: "awaiting_review",
+      actor_agent_id: bob.id,
+    });
+    const res = await transitionTaskStatus({
+      task_id: t.id,
+      to_status: "done",
+      actor_agent_id: bob.id,
+      result_snapshot_id: r.snapshot_id,
+    });
+    assert.equal(res.task.status, "changes_requested");
+    assert.ok(
+      (res.criteria_failures ?? []).some((f) =>
+        f.includes("snapshot not in task workspace"),
+      ),
+      `expected workspace-binding failure, got: ${JSON.stringify(res.criteria_failures)}`,
+    );
   });
 });

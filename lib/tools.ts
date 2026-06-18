@@ -6,11 +6,13 @@ import {
   applyPatch,
   canRead,
   canWrite,
+  fileDiffSummary,
   getSnapshot,
   getWorkspace,
   listFiles,
   readFileAt,
 } from "./workspaces";
+import { collapseContext, diffLines } from "./diff";
 import {
   addTaskDependency,
   createSubtask,
@@ -26,6 +28,7 @@ import {
   sendMessage,
 } from "./conversations";
 import { agentCapabilityNames, getAgent } from "./agents";
+import { agentMayUseResource } from "./grants";
 import type { Agent, TaskStatus } from "./types";
 
 // -------------------------------------------------------------------------
@@ -101,9 +104,29 @@ const workspaceReadFile: Tool = {
     const rev = optional<string>(args, "rev", "string");
     const ws = getWorkspace(wsId);
     if (!ws) throw new Error("workspace not found");
-    if (!canRead(ws.id, ctx.agent.id)) throw new Error("not subscribed");
+    if (
+      !canRead(ws.id, ctx.agent.id) &&
+      !agentMayUseResource({
+        using_agent_id: ctx.agent.id,
+        resource_type: "workspace",
+        resource_id: ws.id,
+        required_scope: "read",
+      })
+    ) {
+      throw new Error("not subscribed and no read grant");
+    }
     const effectiveRev = rev ?? ws.head_snapshot_id;
     if (!effectiveRev) throw new Error("workspace has no head snapshot");
+    // IDOR guard: an explicit rev (snapshot id) must belong to THIS workspace.
+    // Without this, an authorized reader of workspace A could read any other
+    // workspace's file content by passing a foreign snapshot id as `rev`.
+    // Mirrors the same check in workspace.list_files below.
+    if (rev) {
+      const snap = getSnapshot(rev);
+      if (!snap || snap.workspace_id !== ws.id) {
+        throw new Error("rev not in this workspace");
+      }
+    }
     const f = readFileAt(effectiveRev, path);
     if (!f) throw new Error("file not found at rev");
     return {
@@ -146,7 +169,17 @@ const workspaceWriteFile: Tool = {
 
     const ws = getWorkspace(wsId);
     if (!ws) throw new Error("workspace not found");
-    if (!canWrite(ws.id, ctx.agent.id)) throw new Error("writer role required");
+    if (
+      !canWrite(ws.id, ctx.agent.id) &&
+      !agentMayUseResource({
+        using_agent_id: ctx.agent.id,
+        resource_type: "workspace",
+        resource_id: ws.id,
+        required_scope: "write",
+      })
+    ) {
+      throw new Error("writer role or write grant required");
+    }
     const result = applyPatch({
       workspace_id: ws.id,
       agent_id: ctx.agent.id,
@@ -177,7 +210,17 @@ const workspaceListFiles: Tool = {
     const rev = optional<string>(args, "rev", "string");
     const ws = getWorkspace(wsId);
     if (!ws) throw new Error("workspace not found");
-    if (!canRead(ws.id, ctx.agent.id)) throw new Error("not subscribed");
+    if (
+      !canRead(ws.id, ctx.agent.id) &&
+      !agentMayUseResource({
+        using_agent_id: ctx.agent.id,
+        resource_type: "workspace",
+        resource_id: ws.id,
+        required_scope: "read",
+      })
+    ) {
+      throw new Error("not subscribed and no read grant");
+    }
     const effectiveRev = rev ?? ws.head_snapshot_id;
     if (!effectiveRev) throw new Error("workspace has no head snapshot");
     if (rev) {
@@ -195,6 +238,115 @@ const workspaceListFiles: Tool = {
         sha: f.content_sha256,
         size: f.size_bytes,
       })),
+    };
+  },
+};
+
+// Caps for workspace.diff payloads — agents consume these in an LLM context
+// window, so favor "summary always, line-detail for small text files".
+const DIFF_MAX_FILES = 20;
+const DIFF_MAX_FILE_BYTES = 64 * 1024;
+const DIFF_MAX_TOTAL_CHARS = 48 * 1024;
+
+/** Render a DiffResult as compact unified-ish text ("+added / -deleted /
+ *  space context", boring middles collapsed) — what an agent actually wants
+ *  to see in its context window. */
+function renderDiffText(a: string, b: string): string | null {
+  const d = diffLines(a, b);
+  if (!d.ok) return null;
+  const rows = collapseContext(d.lines, 2);
+  const out: string[] = [];
+  for (const r of rows) {
+    if (r.kind === "skip") out.push(`… ${r.count} unchanged lines …`);
+    else if (r.kind === "add") out.push(`+ ${r.text}`);
+    else if (r.kind === "del") out.push(`- ${r.text}`);
+    else out.push(`  ${r.text}`);
+  }
+  return out.join("\n");
+}
+
+const workspaceDiff: Tool = {
+  name: "workspace.diff",
+  description:
+    "Diff two snapshots of a workspace (defaults: the head vs its parent — i.e. \"what changed last\"). Returns a per-file summary plus compact line diffs for small text files. Use this to SEE what another agent changed instead of trusting prose.",
+  requires_capability: "workspace.read",
+  schema: {
+    type: "object",
+    required: ["workspace_id"],
+    properties: {
+      workspace_id: { type: "string", description: "workspace id (wks_...)" },
+      to_rev: {
+        type: "string",
+        description: "newer snapshot id; defaults to current head",
+      },
+      from_rev: {
+        type: "string",
+        description: "older snapshot id; defaults to to_rev's parent",
+      },
+    },
+  },
+  async invoke(args, ctx) {
+    const wsId = need<string>(args, "workspace_id", "string");
+    const toRevArg = optional<string>(args, "to_rev", "string");
+    const fromRevArg = optional<string>(args, "from_rev", "string");
+    const ws = getWorkspace(wsId);
+    if (!ws) throw new Error("workspace not found");
+    if (
+      !canRead(ws.id, ctx.agent.id) &&
+      !agentMayUseResource({
+        using_agent_id: ctx.agent.id,
+        resource_type: "workspace",
+        resource_id: ws.id,
+        required_scope: "read",
+      })
+    ) {
+      throw new Error("not subscribed and no read grant");
+    }
+    const toRev = toRevArg ?? ws.head_snapshot_id;
+    if (!toRev) throw new Error("workspace has no head snapshot");
+    const toSnap = getSnapshot(toRev);
+    // IDOR guard — both revs must belong to THIS workspace (same rationale
+    // as workspace.read_file).
+    if (!toSnap || toSnap.workspace_id !== ws.id) {
+      throw new Error("to_rev not in this workspace");
+    }
+    const fromRev = fromRevArg ?? toSnap.parent_snapshot_id;
+    if (fromRev) {
+      const fromSnap = getSnapshot(fromRev);
+      if (!fromSnap || fromSnap.workspace_id !== ws.id) {
+        throw new Error("from_rev not in this workspace");
+      }
+    }
+    const summary = fileDiffSummary(fromRev, toRev);
+    let budget = DIFF_MAX_TOTAL_CHARS;
+    const files = summary.slice(0, DIFF_MAX_FILES).map((s) => {
+      let diff: string | null = null;
+      if (budget > 0 && s.status !== "deleted" && s.size_bytes <= DIFF_MAX_FILE_BYTES) {
+        const after = readFileAt(toRev, s.path);
+        const before =
+          s.status === "modified" && fromRev ? readFileAt(fromRev, s.path) : null;
+        if (after) {
+          diff = renderDiffText(
+            before ? before.content.toString("utf8") : "",
+            after.content.toString("utf8"),
+          );
+          if (diff && diff.length > budget) {
+            diff = diff.slice(0, budget) + "\n… (truncated)";
+          }
+          if (diff) budget -= diff.length;
+        }
+      }
+      return { ...s, ...(diff !== null ? { diff } : {}) };
+    });
+    return {
+      workspace_id: ws.id,
+      from_rev: fromRev,
+      to_rev: toRev,
+      created_by_agent_id: toSnap.created_by_agent_id,
+      commit_message: toSnap.commit_message,
+      total_changed: summary.length,
+      truncated: summary.length > DIFF_MAX_FILES,
+      files,
     };
   },
 };
@@ -451,6 +603,7 @@ export const TOOLS: Record<string, Tool> = {
   [workspaceReadFile.name]: workspaceReadFile,
   [workspaceWriteFile.name]: workspaceWriteFile,
   [workspaceListFiles.name]: workspaceListFiles,
+  [workspaceDiff.name]: workspaceDiff,
   [taskUpdateStatus.name]: taskUpdateStatus,
   [taskCreateSubtask.name]: taskCreateSubtask,
   [taskSplit.name]: taskSplit,

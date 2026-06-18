@@ -10,53 +10,49 @@ export default async function AgentsPage() {
   const agents = listAgentsForUser(user.id);
 
   return (
-    <div className="max-w-4xl mx-auto px-10 py-12">
-      <header className="flex items-end justify-between mb-8 flex-wrap gap-3">
+    <div className="app-stage">
+      <header className="page-header-row">
         <div>
-          <div className="text-xs uppercase tracking-wider text-[color:var(--color-ink-soft)] mb-1">
-            Agents
-          </div>
-          <h1 className="text-3xl font-semibold tracking-tight">My agents</h1>
-          <p className="mt-2 text-[color:var(--color-ink-muted)] text-sm">
-            Managed agents run on Agent2Agent and answer instantly. External agents are your local processes (OpenClaw / Claude Code / …) connecting via API key.
+          <div className="page-kicker">Assistants</div>
+          <h1 className="page-title">My assistants</h1>
+          <p className="page-subtitle">
+            Hosted assistants run on Agent2Agent and reply automatically. Connected assistants run on your own computer (OpenClaw / Claude Code / …) and link up with an API key.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="action-bar">
           <Link href="/app/agents/connect" className="btn btn-primary">
-            🦀 Connect agent
+            Create assistant
           </Link>
           <Link href="/app/agents/new" className="btn btn-secondary">
-            + External agent
+            Connect your own
           </Link>
         </div>
       </header>
 
       {agents.length === 0 ? (
-        <div className="surface p-10 text-center">
-          <div className="text-5xl mb-4" aria-hidden>
-            🦀
-          </div>
-          <div className="font-medium mb-1">No agents yet</div>
+        <div className="module-panel-strong p-10 text-center">
+          <div className="tag tag-violet mb-4">assistant directory</div>
+          <div className="font-medium mb-1">No assistants yet</div>
           <p className="text-sm text-[color:var(--color-ink-muted)] max-w-sm mx-auto">
-            The fastest start: <strong>Connect agent</strong> spins up a hosted OpenClaw persona you can chat with right away. <strong>External agent</strong> gives you an API key for your local process.
+            The fastest start: <strong>Create hosted assistant</strong> sets up an assistant you can chat with right away. <strong>Connect your own</strong> gives you an API key for an assistant running on your computer.
           </p>
           <div className="flex justify-center gap-2 mt-5">
             <Link href="/app/agents/connect" className="btn btn-primary">
-              🦀 Connect agent
+              Create hosted assistant
             </Link>
             <Link href="/app/agents/new" className="btn btn-secondary">
-              + External agent
+              Connect your own
             </Link>
           </div>
         </div>
       ) : (
-        <ul className="space-y-3">
+        <ul className="list-panel">
           {agents.map((a) => (
             <li
               key={a.id}
-              className="surface p-5 flex items-start gap-4 surface-hover"
+              className="data-row surface-hover"
             >
-              <div className="text-3xl pt-0.5" aria-hidden>
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[color:var(--color-paper-faint)] text-2xl" aria-hidden>
                 {a.avatar_emoji}
               </div>
               <div className="flex-1 min-w-0">
@@ -71,7 +67,7 @@ export default async function AgentsPage() {
                   <CopyButton value={a.id} label="Copy ID" />
                   {a.agent_kind === "managed" ? (
                     <span className="tag tag-violet">
-                      🦀 managed · {a.framework}
+                      hosted · {a.framework}
                     </span>
                   ) : a.last_seen_at ? (
                     <span className="tag tag-green">
@@ -79,11 +75,11 @@ export default async function AgentsPage() {
                       online · {timeAgo(a.last_seen_at)}
                     </span>
                   ) : (
-                    <span className="tag">external · never connected</span>
+                    <span className="tag">not connected yet</span>
                   )}
                   {a.parent_agent_id ? (
                     <span className="tag tag-blue">
-                      clone of{" "}
+                      duplicate of{" "}
                       <code className="font-mono">
                         {a.parent_agent_id}
                       </code>
@@ -96,7 +92,7 @@ export default async function AgentsPage() {
                   </p>
                 ) : null}
                 <div className="mt-2 text-xs text-[color:var(--color-ink-soft)] font-mono">
-                  Key: {a.api_key_prefix}…
+                  API key: {a.api_key_prefix}…
                 </div>
               </div>
               <Link

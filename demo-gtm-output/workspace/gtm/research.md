@@ -1,0 +1,13 @@
+- Global embedded finance market size: $138B (projected 2027 valuation, per Grand View Research)
+- Competitors:
+  - Stripe: Reconciliation capabilities bundled in enterprise payment platform; custom pricing based on volume and features
+  - Modern Treasury: Dedicated financial operations infrastructure with reconciliation; starts at ~$1,500/month for core reconciliation features
+  - Unit: Banking-as-a-service platform with built-in reconciliation tools; custom pricing based on transaction volume and integration complexity
+- Adoption and regulatory risks:
+  - Cross-jurisdictional regulatory compliance complexity for financial reconciliation (e.g., varying GAAP/IFRS requirements, tax reporting rules)
+  - Integration friction with legacy accounting systems commonly used by vertical SaaS companies (e.g., QuickBooks Desktop, Sage)
+  - Data security and privacy risks when handling sensitive financial data across multiple systems and cloud environments
+- Sources:
+  - https://www.grandviewresearch.com/industry-analysis/embedded-finance-market
+  - https://www.mordorintelligence.com/industry-reports/embedded-finance-market
+  - https://www.forbes.com/sites/forbestechcouncil/2023/05/15/the-rise-of-embedded-finance-how-it-is-transforming-digital-experiences/

@@ -474,6 +474,39 @@ const SCHEMA_STATEMENTS: string[] = [
     PRIMARY KEY (invite_id, redeemer_user_id)
   )`,
 
+  // v0.15 — directed agent-to-agent handoffs with content filtering + dual
+  // human approval. A handoff captures: who's sending (from_agent), to whom
+  // (to_agent), the filtered share-able body, the count/summary of what was
+  // redacted, and the lifecycle status. On accept, the responding user's
+  // approval triggers workspace subscription + agent_link acceptance so the
+  // two agents can collaborate autonomously.
+  `CREATE TABLE IF NOT EXISTS handoffs (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    workspace_id TEXT REFERENCES workspaces(id) ON DELETE SET NULL,
+    from_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    from_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    to_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    to_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    brief TEXT NOT NULL DEFAULT '',
+    shared_body TEXT NOT NULL DEFAULT '',
+    private_summary TEXT NOT NULL DEFAULT '',
+    redaction_count INTEGER NOT NULL DEFAULT 0,
+    attachment_ids_json TEXT NOT NULL DEFAULT '[]',
+    task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+    link_id TEXT REFERENCES agent_links(id) ON DELETE SET NULL,
+    status TEXT NOT NULL CHECK (status IN
+      ('proposed','accepted','declined','withdrawn','completed')),
+    created_at INTEGER NOT NULL,
+    responded_at INTEGER,
+    response_note TEXT NOT NULL DEFAULT ''
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_handoffs_conv
+    ON handoffs(conversation_id, created_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_handoffs_to_user
+    ON handoffs(to_user_id, status)`,
+
   `CREATE TABLE IF NOT EXISTS sandbox_runs (
     id TEXT PRIMARY KEY,
     task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
@@ -490,6 +523,113 @@ const SCHEMA_STATEMENTS: string[] = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_sandbox_runs_task
     ON sandbox_runs(task_id, started_at DESC)`,
+
+  // Capability-scoped delegation grants — inspired by UCAN (signed,
+  // scope-bound, time-limited delegation) and MCP's principle-of-least-
+  // privilege. When user A's agent shares a workspace with user B's
+  // agent we no longer flip B to a blanket 'writer'; instead we issue a
+  // signed grant pinned to the specific (resource, scope, expiry) tuple
+  // and gate every actual read/write through verifyGrant().
+  //
+  //   resource_type ∈ {'workspace', 'file', 'conversation', 'task'}
+  //   scopes  = JSON array, subset of {'read','comment','write','admin'}
+  //   signature = HMAC(server-secret, canonical(payload)) so revocation +
+  //               server-side equality checks are cheap. We use HMAC, not
+  //               public-key crypto, because the grant only crosses our
+  //               own server's trust boundary; a future "share with a
+  //               federated A2A agent" path can swap to Ed25519 over the
+  //               same payload schema without table changes.
+  `CREATE TABLE IF NOT EXISTS shared_grants (
+    id TEXT PRIMARY KEY,
+    from_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    from_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    to_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    to_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    resource_type TEXT NOT NULL,
+    resource_id TEXT NOT NULL,
+    scopes_json TEXT NOT NULL DEFAULT '[]',
+    handoff_id TEXT REFERENCES handoffs(id) ON DELETE SET NULL,
+    signature TEXT NOT NULL,
+    expires_at INTEGER,
+    revoked_at INTEGER,
+    revoked_reason TEXT,
+    last_used_at INTEGER,
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_grants_to_agent
+    ON shared_grants(to_agent_id, resource_type, resource_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_grants_resource
+    ON shared_grants(resource_type, resource_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_grants_from_user
+    ON shared_grants(from_user_id, created_at DESC)`,
+
+  // v0.16 — A2A push-notification configs. A spec-compliant peer registers a
+  // webhook (tasks/pushNotificationConfig/set) so we can POST task state
+  // changes when they're disconnected, instead of holding an SSE open.
+  `CREATE TABLE IF NOT EXISTS a2a_push_configs (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    url TEXT NOT NULL,
+    token TEXT,
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_a2a_push_task
+    ON a2a_push_configs(task_id)`,
+
+  // v0.17 — A2A message/send idempotency. The spec's Message.messageId is
+  // client-generated; replaying the same (caller, target, messageId) returns
+  // the originally-created task instead of opening a duplicate one.
+  `CREATE TABLE IF NOT EXISTS a2a_idempotency (
+    idem_key TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL
+  )`,
+
+  // v0.17 — OAuth-style device-authorization flow for agent onboarding. A
+  // local agent POSTs /api/v1/auth/device, shows the user_code to its human,
+  // and polls; the human approves at /app/device, which mints the external
+  // agent + API key. The key sits in api_key only until the FIRST authorized
+  // poll claims it (then it's nulled) — we never keep plaintext keys at rest
+  // longer than the handshake.
+  `CREATE TABLE IF NOT EXISTS device_auth_requests (
+    id TEXT PRIMARY KEY,
+    device_code TEXT NOT NULL UNIQUE,
+    user_code TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    agent_name TEXT NOT NULL DEFAULT '',
+    platform TEXT NOT NULL DEFAULT 'generic',
+    approved_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+    agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+    api_key TEXT,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_device_auth_user_code
+    ON device_auth_requests(user_code)`,
+
+  // v0.26 — account email flows. Tokens are stored only as sha256 hashes
+  // (the plaintext lives only in the emailed link); one-time (used_at) and
+  // short-TTL (expires_at). Swept by lib/maintenance.ts.
+  `CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    used_at INTEGER
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_pwd_reset_user
+    ON password_reset_tokens(user_id)`,
+  `CREATE TABLE IF NOT EXISTS email_verification_tokens (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    used_at INTEGER
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_email_verify_user
+    ON email_verification_tokens(user_id)`,
 ];
 
 function ensureColumn(
@@ -523,4 +663,34 @@ export function migrate(d: Database.Database): void {
   ensureColumn(d, "messages", "deleted_at", "deleted_at INTEGER");
   ensureColumn(d, "agents", "capabilities", "capabilities TEXT NOT NULL DEFAULT '[]'");
   ensureColumn(d, "conversation_events", "ref_id", "ref_id TEXT");
+  // v0.16 — proposer-chosen scope + duration that travel through to the
+  // grants issued on accept. Defaults at the SQL level so historical
+  // handoffs decoded by listHandoffsForConversation() have safe values.
+  ensureColumn(
+    d,
+    "handoffs",
+    "scopes_json",
+    "scopes_json TEXT NOT NULL DEFAULT '[\"read\",\"comment\"]'",
+  );
+  ensureColumn(
+    d,
+    "handoffs",
+    "duration_key",
+    "duration_key TEXT NOT NULL DEFAULT '24h'",
+  );
+  // v0.20 — lease-based job claim. lease_until lets a crashed worker's job be
+  // re-delivered once its lease expires (at-least-once), instead of the old
+  // blanket-fail-on-restart which permanently lost in-flight jobs.
+  ensureColumn(d, "reply_jobs", "lease_until", "lease_until INTEGER");
+  // v0.20.1 — idempotency for at-least-once delivery. Records the message a
+  // job already sent so a re-claimed (re-delivered) job can't post a second.
+  ensureColumn(d, "reply_jobs", "sent_message_id", "sent_message_id TEXT");
+  // v0.21 — outbound A2A client. When a remote agent is connected by URL we
+  // archive the raw card JSON and the JWS verification state on the proxy
+  // agent row ('verified' | 'unverified' | 'invalid').
+  ensureColumn(d, "agents", "a2a_card_json", "a2a_card_json TEXT");
+  ensureColumn(d, "agents", "a2a_card_verified", "a2a_card_verified TEXT");
+  // v0.26 — email verification state (null = unverified). Soft signal by
+  // default; sign-in gating is opt-in via A2A_REQUIRE_EMAIL_VERIFICATION.
+  ensureColumn(d, "users", "email_verified_at", "email_verified_at INTEGER");
 }

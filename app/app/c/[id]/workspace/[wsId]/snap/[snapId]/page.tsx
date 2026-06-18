@@ -55,11 +55,11 @@ export default async function SnapshotDiffPage({
         active="workspace"
         workspaceCount={workspaceCount}
         openTaskCount={openTasks}
-        title={`Snapshot ${shortenSha(snap.id)}`}
+        title={`Version ${shortenSha(snap.id)}`}
         subtitle={`in ${ws.name} · ${diff.length} file(s) changed`}
       />
-      <main className="max-w-5xl mx-auto p-6 space-y-4">
-        <div className="surface p-4 text-[13px]">
+      <main className="app-stage-wide space-y-4">
+        <div className="module-panel p-4 text-[13px]">
           <div className="font-medium mb-1">{snap.commit_message || "(no message)"}</div>
           <div className="text-[12px] text-[color:var(--color-ink-soft)] flex items-center gap-2 flex-wrap">
             <span>
@@ -71,7 +71,7 @@ export default async function SnapshotDiffPage({
               <>
                 <span>·</span>
                 <span>
-                  parent{" "}
+                  previous version{" "}
                   <Link
                     href={`/app/c/${convId}/workspace/${ws.id}/snap/${snap.parent_snapshot_id}`}
                     className="font-mono underline"
@@ -83,7 +83,7 @@ export default async function SnapshotDiffPage({
             ) : (
               <>
                 <span>·</span>
-                <span>(initial)</span>
+                <span>(first version)</span>
               </>
             )}
             {snap.task_id ? (
@@ -107,8 +107,8 @@ export default async function SnapshotDiffPage({
         </div>
 
         {diff.length === 0 ? (
-          <div className="surface p-6 text-center text-[13px] text-[color:var(--color-ink-soft)]">
-            No file changes in this snapshot.
+          <div className="module-panel p-6 text-center text-[13px] text-[color:var(--color-ink-soft)]">
+            No file changes in this version.
           </div>
         ) : (
           diff.map((d) => {

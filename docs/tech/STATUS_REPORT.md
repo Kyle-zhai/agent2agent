@@ -1,132 +1,85 @@
 ---
-title: 现状报告 — 对照最初目标的诚实差距
+title: 现状报告 — 对照"真实用户能用"的诚实差距
 type: status
 status: living
-last_updated: 2026-05-11
-tags: [报告, gap, 完整度]
-links: [[INDEX]], [[ROADMAP]], [[AUTONOMOUS_DESIGN]]
+last_updated: 2026-06-11
+tags: [报告, gap, 完整度, 上线]
+links: [[INDEX]], [[ROADMAP]], [[FEATURES]], [[V021_ACCEPTANCE]], [[UX_AUDIT]], [[SECURITY]]
 ---
 
 # 现状报告
 
 > [!summary]
-> 截至 **v0.13.1**，对照你最初原话的产品 brief + 后续追加要求，**核心功能 100% 落地**，剩下的是 a) 你显式跳过的项（Vercel 部署 / 真 WebSocket）、b) 微信化非好友功能（你说不要）、c) 一些 polish 项（OAuth 头像 / 空状态 / onboarding 流畅度）。本文记录精确的差距清单，无浮夸。
+> 截至 **v0.24**（2026-06-11，工作树含未提交的 v0.21–v0.24 批次），产品形态是
+> "**人与 AI 助手共事的协作平台**"：群聊、共享版本化文件、聊天内建任务、跨用户
+> handoff/grant、双向 A2A 协议互通、统一 Inbox。核心能力全部落地，**391/391 测试
+> 通过、tsc/build 干净**。但按"陌生人注册就能用"的标准衡量，还有几条**硬差距**
+> （账号找回、邮件、数据库、LLM 计费）。本文分三层：已完成 / 上线硬差距 / polish。
+> 无浮夸。逐项明细以 [[FEATURES]] 为准（如果描述和代码不一致，以代码为准）。
 
-## 完成 ✅
+## 已完成 ✅（能力组级别）
 
-### 原话明确要求
-
-| 项 | 实现位置 |
-|---|---|
-| AI 版微信 | 整个产品形态 |
-| 联系人可以是 agent 或人 | conversation_members + agents.agent_kind |
-| 人通过 normal 社交方式添加（WeChat/Instagram/Google/GitHub/Apple OAuth）| v0.9 |
-| Agent 通过 specific way 加（OpenClaw install.md + install/openclaw.md）| v0.1–v0.2 |
-| 群组：人 + 我的 agent + 别人 + 别人的 agent | createGroupConversation + listMembers |
-| 用户告诉自己 agent 做了什么 → agent 打包发给对方 agent | ContextNote + workspace + task |
-| 对方 agent 收到 → 报告主人 → 主人同意后两 agent 协作 | heartbeat pending_messages / sessions SSE / approve flow |
-| 后续迭代 agent 内部自主通信 | sessions(v0.6) + tool calling(v0.7) + reverse RPC(v0.12) |
-| 读文件夹下的文件 + 我的描述 | workspace + context note |
-| Web 先做 | Next.js 16 App Router |
-| 画面精美、高级感、Notion 风格 | `app/globals.css` Notion-derived palette + surfaces + callouts |
-| 所有能想象到的安全级别 | CSP / scrypt+lockout / rate-limit / audit / magic-byte / XSS allowlist / SQL prepared / OAuth state MAC + timingSafeEqual / 路径校验 / capability gate |
-| Telegram 风格聊天 UI | ConversationView Telegram 视觉 + reply/edit/delete/reactions |
-| Agent thinking 群内可见 | messages.thinking 列 + 折叠 UI |
-| 多个 agent 分身 | spawnManagedAgent + cloneManagedAgent + parent_agent_id |
-| 原生 OpenClaw（in-platform，非本地装）| managed agent kind + brain providers |
-| 4 小时自主迭代、自检、自 PR | git log 历史 |
-| 中文 Obsidian 文档 | docs/tech/*.md 14 篇专属页 |
-
-### 你追加 / 自然延伸要求
-
-| 项 | 实现位置 |
-|---|---|
-| 共用工作区 | v0.5 workspace |
-| 两个不同人的 agent 协作 | v0.5 + v0.5.1 + v0.6 端到端 |
-| 真自主协作（不需点 approve）| v0.11 自动 reviewer + v0.7/12 工具调用 |
-| Task 依赖 + 子 task 派生 | v0.10 |
-| 冲突 UI | v0.11 |
-| 反向 MCP RPC | v0.12 |
-| 多 agent 协作模式中适合 IM 的（Debate + Hub & Spoke）| v0.13 |
-| 代码审计 + bug 修 | v0.13.1（4 个 real bug 已修）|
-
-## 显式不做（你确认过）
-
-- ⛔ **Vercel 部署** —— 你说"先不部署"。OPERATIONS.md 里写了完整迁移步骤（Postgres + @vercel/blob + 删 serverExternalPackages + Sandbox token），等需要时直接照做
-- ⛔ **真 WebSocket** —— 等同于上，需要换部署模型。现用 SSE + cursor 长连接已等价
-- ⛔ **微信里的非好友功能**（朋友圈 / 扫码 / 红包 / 语音 / 视频）—— 你明说不要
-- ⛔ **Tool Chain server 端 DAG runner** —— 跟产品形态不匹配（agent 本地脚本就能串）
-- ⛔ **Pattern 选择 dropdown / ROI 度量看板** —— 企业 orchestrator 语言，UX 累赘
-
-## Polish 待办（小，不阻塞产品上线）
-
-| 项 | 工作量 | 影响 |
+| 能力组 | 位置 | 备注 |
 |---|---|---|
-| OAuth 注册用户自动拉 provider 头像（profile.picture → saveAvatarBytes） | ~1h | 新用户首次看到的 UI 不那么"空" |
-| `/app` 无 agent 时引导卡片更突出（不只是文字） | ~30min | 第一次登录的 user 不知道下一步 |
-| Invite 流程：被邀请人无 agent 时，跳过去建一个再回来 | 已经做了，但视觉 hint 弱 | UX |
-| Demo seed 加 v0.13 示例（debate 任务 + hub-spoke 父任务） | ~1h | `npm run demo` 看到完整能力 |
-| Agent 详情页加 "Hosted MCP tools" 编辑（让 user 通过 UI 编 mcp.host capability） | ~2h | 现在只能 PUT API 改 capabilities，UI 看不到 hosted tools 配置 |
-| 群成员 timeline 加 "X joined / left" 系统消息 | 已经有 conversation_events kind=member_add / remove，但 UI 没渲染 | UX |
-| Sandbox runs 在 task 详情页折叠面板显示 stdout/stderr | ~2h | 现在数据在 sandbox_runs 表里没暴露 UI |
-| Audit log 自动定期 prune（>90 天） | ~30min + cron | 表无限增长（不阻塞，但生产前应做） |
-
-**这些都不是 bug，是"如果还有半天我会做"的列表**。
-
-## 真正不做就不能上线的（0 项）
-
-没有。当前 commit `b8664de` 可以直接挂个 Cloudflare Tunnel / 内网穿透给真实用户用，前提：
-1. 操作员设 `SESSION_SECRET` 环境变量
-2. 想要 OAuth 就配对应 provider 的 client_id / secret
-3. 想用真 brain 就配 `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`
-4. `npm run build && npm start`
-
-## 自主迭代下一步建议（如果你说继续）
-
-按 ROI 排序：
-
-1. **OAuth 头像 + `/app` 空状态 + Demo seed v0.13 示例**（合计 ~2.5h，是真用户首次体验的差异）
-2. **Sandbox runs 可视化**（运营 task 时知道测试为什么挂了）
-3. **Audit log retention**（生产前必要）
-
-之后真的没什么大事了。要再加只能扩协作模式 / 加新 brain / 加非好友功能（朋友圈那些），但都不在你定义的范围内。
-
-## v0.14 系列新增（截至 2026-05-12）
-
-| 版本 | 主要内容 |
-|---|---|
-| v0.14 | `agent_links` 跨 user 互连双向握手；群创建 UX "+ Group" 预选好友；`addOwnAgentToGroup` 让任意成员可拉自己 agent；chat 顶部 `📁 Files (N)` `✅ Tasks (N)` pill 全屏宽可见；修 React 19 `encType` 报错 |
-| v0.14.1 | 自审找出 4 bug：非群主无法开成员面板、UI 上误显 ✕、`member_added` vs `member_add` kind 不一致、多 agent 用户自拉自己出群报权限错；4 个端到端整合测试 |
-| v0.14.2 | **真 bug**: 测试 cleanup `rmSync(process.cwd()/blobs/workspace)` 抹掉真实 dev blobs → Files 页 "Blob not found"；workspace blob 路径加 `A2A_BLOB_DIR` env 隔离 + `readFileAt` 容错降级 |
-| v0.14.3 | **Workspace 详情页重做**：去掉 IDE 风的文件树 + 选中编辑器，改成所有文件平铺列表 + 单击就地展开查看/编辑 + 底部多文件上传按钮；Access 侧栏保留；`requireUserMember` 保证外部无入口 |
+| Telegram 级聊天（reply/edit/react/forward/@/搜索/SSE） | `components/ConversationView.tsx` 等 | v0.4 系列起 |
+| 托管助手（Model + Instructions + 群内自动回复 + cooldown + thinking 可见） | `lib/brains.ts` / `lib/managed-agents.ts` | mock 零依赖；Anthropic / 任意 OpenAI 兼容端点（`OPENAI_BASE_URL`，含 Qwen/DeepSeek/vLLM） |
+| 外部 agent 接入（API key / device-code / `GET /skill.md` 一句话安装） | `lib/device-auth.ts` 等 | RFC 8628 形 device flow |
+| 共享版本化 workspace（内容寻址 + snapshot DAG + 自动 rebase + 行级 diff3 合并 + 冲突 UI） | `lib/workspaces.ts` / `lib/merge3.ts` | v0.5–v0.20 |
+| 文件 Lark 式阅读视图（Markdown 文档化 / CSV 表格 / 图片内联 / 行号 / 下载） | `components/MarkdownDoc.tsx` + workspace 页 `?open=` | v0.22；只读，编辑归助手工具 |
+| 聊天内建任务（`/task 标题 @assistant`，仅被 @ 的成员助手被指派） | `lib/task-command.ts` | v0.23；New task 表单已整体移除，tasks 页只做跟踪/审核 |
+| Task 状态机 + 依赖/子任务 + success_criteria（含沙箱 `test_command`）+ 自动 reviewer + 有界自主循环 | `lib/tasks.ts` / `lib/autonomous.ts` / `lib/auto-reviewer.ts` | review-gated 永不自批 |
+| 跨用户 handoff（双重 opt-in + 脱敏永不静默丢弃） | `lib/handoffs.ts` | v0.15；accepted 后可 "Mark complete" 触发 grant 级联回收（v0.21 修通） |
+| 签名 capability grants（scope/resource/time-bound，**已强制执行**，revoke 即断） | `lib/grants.ts` | v0.16 |
+| A2A 协议双向互通（入站双方言 + JWS 签名卡片 + 幂等 + push；**出站按 URL 连远端 agent 入群**） | `lib/a2a.ts` / `lib/a2a-client.ts` | v0.16–v0.21；防 card poisoning：卡片文本永不进 LLM prompt |
+| Agent Inbox（5 类待办聚合 + rail 角标） | `lib/inbox.ts` + `/app/inbox` | v0.21；只聚合不审批 |
+| 全界面办公软件化文案（assistant/hosted/Model/Instructions…；Access 术语保留） | 全部 app 页面 | v0.22；仅显示层 |
+| UX 批次（Enter 发送 + IME 守卫、按会话草稿、图片 lightbox、查看器 Prev/Next、375px 可用、可消除错误条） | 见 [[UX_AUDIT]] | v0.24 |
+| 安全基线（CSP/限流含全局桶/scrypt+锁定/审计/magic-byte/SSRF 闸/prepared SQL/XSS allowlist） | 见 [[SECURITY]] | 持续硬化至 v0.21 |
+| 运维基线（health / 数据导出 / 统一 TTL sweep 已接线 / `npm run demo` seed / `db:init` 零 drift） | `lib/maintenance.ts` + `instrumentation.ts` | audit prune + session reap 自 v0.20.1 起真的在跑 |
 
 ## 测试 & build 状态
 
-- 测试：**137/137 全过**
-- TypeScript：clean
-- Build：clean
-- 25+ 个 commits 从 v0.1 到 v0.14.3，路径稳定
+- 测试：**391/391 全过**（`npm test`，本批从 298 → 391）
+- TypeScript：`npx tsc --noEmit` clean
+- Build：`next build` clean
+- 真机走查：v0.21 验收 + 双用户复杂场景 + UX 三视口审计，见 [[V021_ACCEPTANCE]] 与 [[UX_AUDIT]]
 
-## 11 张 SQLite 表 + 5 个新列
+## 真实用户上线的硬差距 ❌（不做就别开放注册）
 
-```
-users · sessions · agents (+capabilities)
-friend_requests · friendships
-conversations · conversation_members · conversation_state · conversation_personas
-messages (+thinking/kind/reply_to/edited_at/deleted_at) · messages_fts
-message_attachments · message_reactions · attachments · context_notes
-delivery_queue
-conversation_events (+ref_id)
-reply_jobs · audit_log · rate_limit_buckets
-workspaces · workspace_snapshots · workspace_files · workspace_subscriptions
-tasks · task_events · task_artifacts · task_dependencies
-agent_sessions · tool_invocations · tool_call_requests · sandbox_runs
-oauth_identities · invite_links · invite_redemptions
-```
+| # | 差距 | 现状（已对照代码） | 后果 |
+|---|---|---|---|
+| 1 | **无密码重置** | `lib/auth.ts` 只有注册 / 登录 / 登录态下改密码；全仓无 forgot/reset 路径 | 用户忘记密码 = 账号永久失联，无任何自助或人工通道 |
+| 2 | **无邮箱验证** | `signUp` 直接激活账号，邮箱真假不查 | 任意伪造邮箱注册；后续任何"发邮件给用户"的能力都建立在假地址上 |
+| 3 | **没有邮件系统** | `package.json` 零邮件依赖，全仓无发信代码 | 上面两条的根因；密码重置、验证、通知都没有载体。需选型（SMTP/Resend/SES）+ 模板 + 限流 |
+| 4 | **SQLite 单写者** | `better-sqlite3` 单文件 + 本地 `blobs/`，必须单实例长驻进程 | 不能上 Serverless / 多实例 / 水平扩展；并发写靠同步串行扛。Postgres 迁移是卡口，步骤已写在 [[ROADMAP#Postgres 迁移]] 与 [[OPERATIONS]] |
+| 5 | **LLM key 服务端付费** | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` 是运营者的 key，无 per-user 配额/计费 | 开放注册 = 任何人花你的钱；需要 per-user key（BYO）或用量配额 + 计费，见 [[ROADMAP]] |
 
-## 14 篇 Obsidian 文档
+这五条互相咬合：1/2 依赖 3；4 决定部署形态；5 决定商业模式。**当前形态适合**：
+自部署（个人/团队内网、Cloudflare Tunnel 给熟人用），设好 `SESSION_SECRET`、
+自己的 LLM key，单机跑。**不适合**：公开注册的多租户服务。
 
-INDEX / ARCHITECTURE / AGENT_COLLAB / AUTONOMOUS_DESIGN /
-WORKSPACES / TASKS / SESSIONS / TOOLS / SANDBOX / OAUTH /
-REVERSE_RPC / FEATURES / API / SECURITY / OPENCLAW /
-ROADMAP / OPERATIONS / STATUS_REPORT（本文）
+## 次级差距（上线前应做，但不阻塞熟人使用）
+
+- **无 CI** —— 391 个测试只在本地跑，没有 pipeline 强制
+- **无结构化日志 / metrics endpoint** —— 只有 console + audit_log，运维半盲
+- **备份只有导出** —— `/app/settings/export` 有，恢复/上传式 restore 没有
+- **2FA / E2E 加密 / WAF** —— 见 [[SECURITY]]，均为 roadmap 项
+
+## Polish 待办（小，按 [[FEATURES]] 的 🟡/❌ 核对）
+
+| 项 | 现状 |
+|---|---|
+| 解除好友 / block | 只有 DB 级，UI 无按钮 |
+| 会话内搜索 | filter 参数已有，没 UI |
+| Demo seed 不含 v0.15+ 能力示例 | `npm run demo` 看不到 handoff / grant / 远端 A2A / Inbox 有货的样子 |
+| OpenAPI spec | 无；可从 route handler 生成 |
+| Pin 单条消息 / 线程视图 | 未做（IM polish，另开版本） |
+| 移动端深水区（手势、虚拟键盘细节） | v0.24 只做了急救（375px 可用），完整 backlog 在 [[UX_AUDIT]] |
+
+**这些不是 bug，是"如果还有半天我会做"的列表。**
+
+## 历史基线
+
+本文 2026-06-05 之前的版本以 v0.13.1 为基线，其中列的 polish 项（如 audit log
+定期 prune）已在 v0.20.1 接线完成，故不再保留旧清单。v0.1 → v0.24 的完整版本
+明细见 [[INDEX#版本]]；v0.21 批次的验收证据见 [[V021_ACCEPTANCE]]。

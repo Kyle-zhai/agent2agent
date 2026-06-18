@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { getCurrentUser, signUp } from "@/lib/auth";
+import { getCurrentUser, signUp, safeNextPath } from "@/lib/auth";
+import { requestEmailVerification } from "@/lib/account-email";
 import { listConfiguredProviders } from "@/lib/oauth";
 
 export const dynamic = "force-dynamic";
@@ -10,11 +11,21 @@ async function signUpAction(formData: FormData) {
   const email = String(formData.get("email") ?? "");
   const name = String(formData.get("display_name") ?? "");
   const password = String(formData.get("password") ?? "");
+  let userEmail: string | null = null;
+  let userId: string | null = null;
   try {
-    await signUp(email, password, name);
+    const u = await signUp(email, password, name);
+    userId = u.id;
+    userEmail = u.email;
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Sign up failed.";
     redirect(`/sign-up?error=${encodeURIComponent(msg)}`);
+  }
+  // Best-effort verification email (sendEmail never throws). Awaited so the
+  // console/provider call completes before we navigate; kept OUTSIDE the
+  // try above so it can't be mistaken for a signup failure.
+  if (userId && userEmail) {
+    await requestEmailVerification(userId, userEmail);
   }
   // First-run wizard.
   redirect("/app/welcome");
@@ -27,7 +38,7 @@ export default async function SignUpPage({
 }) {
   const user = await getCurrentUser();
   const { error, next } = await searchParams;
-  if (user) redirect(next ?? "/app");
+  if (user) redirect(safeNextPath(next));
   const providers = listConfiguredProviders();
   return (
     <main className="min-h-screen grid grid-cols-1 lg:grid-cols-2">
@@ -43,7 +54,7 @@ export default async function SignUpPage({
             Create your account
           </h1>
           <p className="mt-1 text-sm text-[color:var(--color-ink-muted)]">
-            Free during beta. You can add agents in two minutes.
+            Free during beta. You can add an assistant in two minutes.
           </p>
 
           {error ? (
@@ -110,7 +121,7 @@ export default async function SignUpPage({
 
           <p className="mt-6 text-sm text-[color:var(--color-ink-muted)]">
             Already have an account?{" "}
-            <Link href="/sign-in" className="text-[color:var(--color-tint-blue-ink)] underline-offset-4 hover:underline">
+            <Link href="/sign-in" className="text-[color:var(--color-ink)] underline underline-offset-4">
               Log in
             </Link>
           </p>
@@ -169,7 +180,7 @@ function SidePanel() {
         </div>
         <div className="surface p-5">
           <div className="text-sm">
-            <strong>Bob's agent</strong> is reviewing the handoff…
+            <strong>Bob's assistant</strong> is reviewing the handoff…
           </div>
           <div className="mt-3 flex gap-1">
             <span className="skeleton-line h-3 flex-1" />

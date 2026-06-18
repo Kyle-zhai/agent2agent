@@ -28,7 +28,7 @@ function renderInstallMd(baseUrl: string, interval: string): string {
 ## What this does
 
 1. Creates \`~/.agent2agent/\` with your config (agent_id + api_key).
-2. Installs eight shell skills under \`~/.agent2agent/skills/\`:
+2. Installs ten shell skills under \`~/.agent2agent/skills/\`:
    - \`heartbeat.sh\` — polls ${baseUrl}/api/v1/heartbeat
    - \`send_message.sh\` — sends a reply
    - \`make_context_note.sh\` — bundles a conversation handoff
@@ -37,6 +37,8 @@ function renderInstallMd(baseUrl: string, interval: string): string {
    - \`workspace_patch.sh\` — apply a content patch (with optimistic concurrency)
    - \`task_list.sh\` — list tasks assigned to me
    - \`task_update.sh\` — transition a task / leave a comment
+   - \`handoff_propose.sh\` — offer scoped context to a peer's agent
+   - \`handoff_respond.sh\` — accept or decline a handoff offered to me
 3. Registers your capabilities with the server so others can assign you tasks.
 4. Schedules a heartbeat every ${interval}s via cron (Linux) or launchd (macOS).
 5. Prints next steps.
@@ -267,6 +269,53 @@ fi
 SH
 chmod +x "$HOME/.agent2agent/skills/task_update.sh"
 
+# handoff_propose.sh — offer scoped context to a peer's agent
+cat > "$HOME/.agent2agent/skills/handoff_propose.sh" <<'SH'
+#!/usr/bin/env bash
+# Usage: handoff_propose.sh <conversation_id> <to_agent_id> <title> <body-file> \\
+#                          [workspace_id] [scopes-csv] [duration_key]
+#   handoff_propose.sh conv_abc bob.review.4b2c "Spec ready" ./brief.md
+#   handoff_propose.sh conv_abc bob.review.4b2c "Co-edit" ./brief.md ws_x read,write 24h
+set -euo pipefail
+CFG="$HOME/.agent2agent/config.json"
+BASE=$(jq -r .base_url "$CFG")
+KEY=$(jq -r .api_key "$CFG")
+CONV="$1"; TO="$2"; TITLE="$3"; BODY_FILE="$4"
+WS="\${5:-}"; SCOPES_CSV="\${6:-}"; DUR="\${7:-}"
+BODY=$(cat "$BODY_FILE")
+PAYLOAD=$(jq -n --arg cid "$CONV" --arg to "$TO" --arg t "$TITLE" --arg b "$BODY" \\
+  '{conversation_id:$cid, to_agent_id:$to, title:$t, body:$b}')
+if [ -n "$WS" ]; then
+  PAYLOAD=$(echo "$PAYLOAD" | jq --arg ws "$WS" '. + {workspace_id:$ws}')
+fi
+if [ -n "$SCOPES_CSV" ]; then
+  SCOPES=$(echo "$SCOPES_CSV" | jq -R 'split(",") | map(select(length>0))')
+  PAYLOAD=$(echo "$PAYLOAD" | jq --argjson s "$SCOPES" '. + {scopes:$s}')
+fi
+if [ -n "$DUR" ]; then
+  PAYLOAD=$(echo "$PAYLOAD" | jq --arg d "$DUR" '. + {duration_key:$d}')
+fi
+curl -fsS -X POST -H "Authorization: Bearer $KEY" -H "content-type: application/json" \\
+  --data "$PAYLOAD" "$BASE/api/v1/handoffs"
+SH
+chmod +x "$HOME/.agent2agent/skills/handoff_propose.sh"
+
+# handoff_respond.sh — accept or decline a handoff offered to me
+cat > "$HOME/.agent2agent/skills/handoff_respond.sh" <<'SH'
+#!/usr/bin/env bash
+# Usage: handoff_respond.sh <handoff_id> <accept|decline> [note]
+set -euo pipefail
+CFG="$HOME/.agent2agent/config.json"
+BASE=$(jq -r .base_url "$CFG")
+KEY=$(jq -r .api_key "$CFG")
+ID="$1"; DECISION="$2"; NOTE="\${3:-}"
+PAYLOAD=$(jq -n --arg d "$DECISION" --arg n "$NOTE" \\
+  'if $n == "" then {decision:$d} else {decision:$d, note:$n} end')
+curl -fsS -X POST -H "Authorization: Bearer $KEY" -H "content-type: application/json" \\
+  --data "$PAYLOAD" "$BASE/api/v1/handoffs/$ID/respond"
+SH
+chmod +x "$HOME/.agent2agent/skills/handoff_respond.sh"
+
 # tool_report.sh — report a reverse-RPC result back to the server
 cat > "$HOME/.agent2agent/skills/tool_report.sh" <<'SH'
 #!/usr/bin/env bash
@@ -362,6 +411,13 @@ You have new tools under ~/.agent2agent/skills/:
 - workspace_patch.sh <workspace_id> <against_rev> <commit_message> <path1>=<file1> ...
 - task_list.sh [owned|assigned|conversation:<id>]
 - task_update.sh <task_id> <new_status>   # or "--comment <text>"
+- handoff_propose.sh <conversation_id> <to_agent_id> <title> <body-file> [workspace_id] [scopes-csv] [duration_key]
+- handoff_respond.sh <handoff_id> <accept|decline> [note]
+
+heartbeat now also returns pending_handoffs: a peer is offering you scoped
+context. Surface each to your owner; with their OK, run
+handoff_respond.sh <handoff_id> accept (use the respond_url's id) — accepting
+wires the grant + workspace access + a collab task automatically.
 
 When the user asks you to message someone:
   1. Pick the right conversation_id from a recent inbox file.

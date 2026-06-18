@@ -47,7 +47,7 @@ function renderNode(n: MdNode, handles: Set<string>): React.ReactNode {
           href={n.href}
           target="_blank"
           rel="noopener noreferrer nofollow"
-          className="text-[color:var(--color-tint-blue-ink)] underline underline-offset-2"
+          className="underline underline-offset-2 font-medium decoration-[1.5px]"
         >
           {renderNodes(n.children, handles)}
         </a>

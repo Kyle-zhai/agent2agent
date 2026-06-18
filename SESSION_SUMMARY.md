@@ -1,177 +1,53 @@
 ---
-title: Autonomous session summary
-date: 2026-05-11
-duration: ~4 hours (started 2026-05-10 21:20 EDT)
-ended_on: main @ v0.4.2
-authored_by: Claude Opus 4.7 (paired with pinan)
+title: Session summary — v0.21–v0.24 batch (uncommitted)
+date: 2026-06-11
+last_updated: 2026-06-11
+baseline: main @ f3b19b6 (v0.14.5f)
+authored_by: Claude (paired with pinan)
 tags: [session-log, summary]
 ---
 
-# Autonomous session — what landed
+# What the working tree contains right now
 
 > [!summary]
-> Brief: build a self-contained Agent2Agent product, mimic Telegram, document
-> everything Obsidian-style, self-create + self-complete + self-verify the PR.
-> Three internal release tags shipped to `main`: **v0.4**, **v0.4.1**, **v0.4.2**.
+> Everything from **v0.21 through v0.24** (2026-06-10/11) sits **uncommitted** in the
+> working tree on `main`, on top of the last commit `f3b19b6`. Scale: 86 tracked files
+> modified (+8,473 / −1,674) plus ~75 new untracked files (new libs, routes, components,
+> tests, docs). Verified at the end of the batch: **391/391 tests** (up from 298),
+> `tsc --noEmit` clean, `next build` clean. Acceptance evidence:
+> [docs/tech/V021_ACCEPTANCE.md](docs/tech/V021_ACCEPTANCE.md); feature truth table:
+> [docs/tech/FEATURES.md](docs/tech/FEATURES.md).
 
-## Releases
+## The four versions in this batch
 
-| Tag | Commit | Theme |
+| Version | Theme | Key new files |
 |---|---|---|
-| **v0.4.0** | `da3dc2f` (merge) | Telegram-style chat + tech docs |
-| **v0.4.1** | `e7756e1` | Image preview, browser notifications, group mgmt, password, demo seed |
-| **v0.4.2** | `2895044` | Brain variety + @mention + forward + per-conv persona + onboarding + landing refresh |
+| **v0.21** | A2A conformance (`historyLength`, `application/a2a+json`, input caps, platform origin card + `A2A_PUBLIC_AGENT_IDS`) · **outbound A2A client** (connect a remote agent by URL: SSRF-gated card fetch + sanitize + JWS verify, brain provider `"a2a"` relay) · security hardening (device-code rate limits incl. global bucket, list caps, delivery_queue TTL, handoff tx recheck, avatar id validation) · **Agent Inbox** (5 pending-item types + rail badge) · "Mark complete" on accepted handoffs (grant revocation cascade now reachable) · read-only workspace file viewer | `lib/a2a-client.ts`, `lib/inbox.ts`, `app/app/inbox/`, `app/.well-known/` |
+| **v0.22** | Lark-style file presentation (Markdown rendered as a document, CSV tables, inline images, line numbers, cookie-auth `?download=1`) · whole-UI plain-language pass (assistant/hosted/Model/Instructions/Connection/version/Thinking; Access kept; brand + ids + install docs unchanged) | `components/MarkdownDoc.tsx` |
+| **v0.23** | Chat-first tasks: `/task Title @assistant` in the composer; **only @-mentioned member assistants get assigned** (no @ = human note); confirmation message posted, raw command not stored; the New task form **removed entirely** (tasks page = tracking/review only) · brains model fallback honors `OPENAI_MODEL`/`ANTHROPIC_MODEL` env (Qwen 404 fix) | `lib/task-command.ts` |
+| **v0.24** | UX pass: Enter-to-send with IME guard everywhere, per-conversation drafts (localStorage), image lightbox, viewer Prev/Next + auto-expand folders, mobile triage (full-width room <md, dock starts minimized), dismissible auto-fade error banners | `docs/tech/UX_AUDIT.md` (full audit + backlog) |
 
-```
-2895044 feat(v0.4.2): brain variety + @mention + forward + per-conv persona + onboarding wizard
-e7756e1 feat(v0.4.1): image preview + notifications + group member mgmt + password change + demo seed
-da3dc2f Merge v0.4: Telegram UI + reply/react/edit + profile + ops + tech docs
-2f83ec5 docs(readme): announce v0.4 + link to docs/tech/INDEX.md
-79a5656 docs: v0.4 pull request writeup + end-to-end screenshots
-08a96f2 feat(v0.4): Telegram-style chat + reply/edit/delete/react/pin/mute/archive + profile + health/export
-4a162e6 docs(tech): seed Obsidian-flavored technical documentation
-```
+## Docs state
 
-`feat/v04-telegram-ui-and-docs` was the development branch; merged with
-`--no-ff` so the v0.4 commit boundary stays visible on `main`. v0.4.1 +
-v0.4.2 landed directly on `main` afterwards. No remote — see
-[`PULL_REQUEST.md`](PULL_REQUEST.md) for the local-PR doc.
+All `docs/tech/*.md` (Chinese, Obsidian-style) were synced to this batch on 2026-06-10/11,
+including the rewritten [STATUS_REPORT](docs/tech/STATUS_REPORT.md) (now anchored to
+v0.24 with explicit launch gaps) and the version table in
+[INDEX](docs/tech/INDEX.md). Root `README.md` was rewritten to current reality.
 
-## What you can do right now
+## How to verify cold
 
 ```bash
 npm install
-PORT=3001 npm run dev
-npm run demo          # populate 3 users + 6 agents + 2 conversations
-# Sign in at http://localhost:3001/sign-in as
-# alice@demo.app / bob@demo.app / carol@demo.app  (pw: Passw0rd-Tester!)
+npm test            # expect 391/391
+npx tsc --noEmit    # expect clean
+npm run demo && npm run dev
+# sign in: alice@demo.app / bob@demo.app / carol@demo.app · Passw0rd-Tester!
 ```
 
-Then:
+## Not done in this session
 
-1. New user → /sign-up → walks through the 3-step welcome wizard.
-2. Connect a hosted OpenClaw → chat with it; reasoning is visible inline.
-3. Pull more agents into a group → @mention one to make it answer past the
-   per-minute cap.
-4. Hover any message → react / reply / forward / edit / delete.
-5. Pin, mute, archive any conversation from the header menu.
-6. /app/settings → audit log + data export + edit profile (avatar, name,
-   password).
-7. `curl localhost:3001/install/openclaw.md` for native OpenClaw integration.
-
-## Full feature surface (anchored in [[FEATURES]])
-
-**Chat (Telegram-grade):** bubble layout · date dividers · hover actions
-(react / reply / forward / copy / edit / delete) · 9-emoji reactions ·
-reply quote inline · 5-min edit/delete window · markdown lexer (XSS-safe)
-· `@mention` with cooldown skip · inline image preview · typing dots ·
-SSE updates with 4 s polling fallback · per-agent pin / mute / archive ·
-group rename · group member add/remove · leave group · forward across
-conversations.
-
-**Agents:** external (your local OpenClaw / Claude Code with API key) +
-managed (hosted, Telegram-bot-style, with mock/anthropic/openai brains)
-· clones with parent linkage · 5 persona templates · per-conv persona
-override (backend) · avatar upload (magic-byte verified).
-
-**Conversation autonomy:** managed agents auto-reply with reasoning blocks
-visible to the room (kind=agent_to_agent + violet chip) · 4/min/agent
-cooldown to prevent loops · @mention bypasses cooldown · adaptive
-heartbeat interval surfaced to external agents.
-
-**Security:** full proxy.ts headers (CSP/HSTS/X-Frame/etc.) · cross-origin
-API gate · token-bucket rate limits per route × identity · password
-complexity + account lockout · constant-time path on missing user ·
-audit log (13 actions) · magic-byte MIME validation · resource caps ·
-XSS-safe rendering everywhere.
-
-**Operations:** /api/health · /app/settings/export → JSON + base64 blobs ·
-schema migrations idempotent on every boot · `npm run demo` for seed
-data.
-
-**Docs:** `docs/tech/{INDEX, ARCHITECTURE, FEATURES, API, OPENCLAW,
-SECURITY, ROADMAP, OPERATIONS}.md` — Obsidian-flavored frontmatter,
-wikilinks, mermaid diagrams, ✅/🟡/❌/💡 status markers.
-
-## What's intentionally not done
-
-- **Mobile**: explicitly excluded.
-- **E2E encryption**: v0.5+ roadmap.
-- **Postgres migration**: gating move for any real launch; documented in
-  [[ROADMAP#postgres-migration]].
-- **Per-user LLM keys**: server-side env keys for now.
-- **WeChat/Instagram import**: per-platform OAuth, deferred.
-
-## Self-PR + self-verify
-
-- All work committed to `main` via the local-PR pattern (no remote yet)
-- `PULL_REQUEST.md` captures the v0.4 surface with motivation + checklist
-  + e2e log + screenshots
-- End-to-end Playwright verification was run against the v0.4 branch
-  before merge: signup → connect OpenClaw → markdown reply → hover bar →
-  reactions → reply quote → conversation menu → pin
-- Build green on each commit; type-check passes
-- 9 screenshots saved in `docs/screenshots/tg-*.png`
-
-## File / line tally
-
-```
-$ git diff --stat 3e76bfe..HEAD | tail -2
-```
-
-| Slice | Files | Insertions |
-|---|---|---|
-| App routes (`app/`) | 28 | ~3,400 |
-| Components (`components/`) | 5 | ~1,200 |
-| Library (`lib/`) | 17 | ~2,500 |
-| Tech docs (`docs/tech/`) | 8 | ~1,400 |
-| Scripts (`scripts/`) | 3 | ~350 |
-| Screenshots (`docs/screenshots/`) | 18 | binary |
-
-Total: ~9,000 lines of code + docs + screenshots, plus a working dev
-server with seeded demo data.
-
----
-
-## Multi-reviewer self-audit (3 rounds)
-
-After the v0.4.2 ship, ran a multi-dimensional self-review using 4
-parallel reviewers (code quality, silent-failure hunter, type-design
-analyzer, comment-accuracy checker). Triaged 36+ findings across the
-three rounds:
-
-- **v0.4.3** (`6f84f5e`) — 25 fixes: @mention loop guard, audit action
-  union expanded, forwardMessage cross-agent fix, deleted-message
-  reaction lockout, blobs cross-conv auth, callAnthropic malformed-
-  response handling, audit catch logging, parseBrainConfig validation,
-  setAgentAvatarFromUpload race guard, brain reply-failed audit + SSE
-  event, 13→16 doc correction, framework/ReactionEmoji/PersonaTemplateKey
-  as-const unions, etc.
-- **v0.4.4** (`3ae540c`) — wired the previously stub'd per-conversation
-  persona override UI.
-- **v0.4.5** (`d89c4da`) — settings audit-action labels expanded, scroll
-  fires only near bottom, retired listConversationsForUser.
-- **v0.4.6** (`2a30060`) — round-2 must-fix: auto-scroll first-load
-  regression, callOpenAI 200-error-envelope, SSE send() logging,
-  parseBrainConfig fallback log, reply-failed UX surface (new
-  FailedRepliesRow that tells the user when an agent gave up).
-- **Tests** (`059cbc8`) — node:test + tsx scaffold, 18 passing tests
-  covering top-2 priority surfaces (edit/delete/react allowlist,
-  markdown XSS allowlist), with helpers + shims so future test files
-  land cleanly.
-- **v0.4.7** (`07165ef`) — final round-3 nit: SSE timers cleared inline
-  in close() instead of via a third polling interval.
-
-Round 3 verdict: **merge to main, ship it.** All 8 round-2 asks landed
-correctly, no new regressions, 18/18 tests green, build clean.
-
----
-
-`<promise>DONE</promise>` reachable from here: the 4-hour autonomous
-brief (create PR, complete it, verify it, build a Telegram-style
-production chat, document everything in Obsidian style, document
-OpenClaw integration paths, mark feature status), followed by an
-explicit multi-dimensional review-until-satisfied request, are both
-satisfied. Seven internal release tags (v0.4.0 through v0.4.7).
-PR doc, README, tech docs, FEATURES status table, ROADMAP, and the
-audit-log labels are all in sync with the code as of `07165ef`.
+- **No commits were made** — the entire batch is working-tree-only by instruction.
+  See [PULL_REQUEST.md](PULL_REQUEST.md) for the landing plan.
+- Launch hard gaps remain (password reset / email verification / mailer / Postgres /
+  per-user LLM keys) — tracked honestly in
+  [docs/tech/STATUS_REPORT.md](docs/tech/STATUS_REPORT.md).

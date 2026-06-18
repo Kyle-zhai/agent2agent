@@ -1,12 +1,14 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
 import { getCurrentUser, signOut } from "@/lib/auth";
 import { listAgentsForUser } from "@/lib/agents";
-import { listConversationsWithState } from "@/lib/conversations";
+import { getConversationListBundles } from "@/lib/conversation-list";
 import { listIncomingRequests } from "@/lib/friends";
+import { countInboxItems } from "@/lib/inbox";
 import { getUserAvatarPath } from "@/lib/users";
 import { NotificationsHook } from "@/components/NotificationsHook";
 import { UnreadSync } from "@/components/UnreadSync";
+import { SidebarRail, type RailItem } from "@/components/SidebarRail";
+import { SidebarPanel } from "@/components/SidebarPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -24,270 +26,101 @@ export default async function AppLayout({
   const user = await getCurrentUser();
   if (!user) redirect("/sign-in");
   const agents = listAgentsForUser(user.id);
-  const convs = listConversationsWithState(user.id);
   const incoming = listIncomingRequests(user.id);
+  // Inbox badge = total pending items across all five sources (handoffs,
+  // interconnects, friend requests, reviews, device approvals). Computed
+  // server-side per request; RailButton hides the badge entirely at zero.
+  const inboxCount = countInboxItems(user.id);
 
-  const pinned = convs
-    .filter((c) => c.state.pinned_at && !c.state.archived_at)
-    .sort((a, b) => (b.state.pinned_at ?? 0) - (a.state.pinned_at ?? 0));
-  const active = convs
-    .filter((c) => !c.state.pinned_at && !c.state.archived_at)
-    .sort((a, b) => (b.last_message?.created_at ?? 0) - (a.last_message?.created_at ?? 0));
-  const archived = convs.filter((c) => c.state.archived_at);
+  const { pinned, active, archived, unreadTotal } = getConversationListBundles(
+    user.id,
+  );
   const userAvatar = getUserAvatarPath(user.id);
-  const unreadTotal = convs
-    .filter((c) => !c.state.muted_at)
-    .reduce((sum, c) => sum + c.unread_count, 0);
+
+  const rail: RailItem[] = [
+    {
+      href: "/app",
+      icon: "home",
+      label: "Home",
+      shortLabel: "Home",
+      matchPrefix: "/app",
+      exact: true,
+    },
+    {
+      href: "/app/inbox",
+      icon: "inbox",
+      label: "Inbox",
+      shortLabel: "Inbox",
+      badge: inboxCount || undefined,
+      matchPrefix: "/app/inbox",
+    },
+    {
+      href: "/app/contacts",
+      icon: "contacts",
+      label: "Contacts",
+      shortLabel: "Contacts",
+      badge: incoming.length || undefined,
+      matchPrefix: "/app/contacts",
+    },
+    {
+      href: "/app/agents",
+      icon: "agents",
+      label: "My assistants",
+      shortLabel: "Assistants",
+      matchPrefix: "/app/agents",
+    },
+    {
+      href: "/app/search",
+      icon: "search",
+      label: "Search",
+      shortLabel: "Search",
+      matchPrefix: "/app/search",
+    },
+    {
+      href: "/app/settings",
+      icon: "settings",
+      label: "Settings",
+      shortLabel: "Settings",
+      matchPrefix: "/app/settings",
+    },
+  ];
+  // Quiet the "unused variable" lint hint — `agents` was used previously
+  // for an empty-state badge that we removed; keep the import path for
+  // future re-use.
+  void agents;
 
   return (
-    <div className="min-h-screen flex">
+    // Anchor to the exact visible client area (`fixed inset-0`) so the shell
+    // never causes page scroll. Inside it we CENTER a contained app frame with
+    // breathing room on all four sides: on large screens the frame caps its
+    // size and floats on the canvas backdrop with margins; on smaller screens
+    // it fills the available space (minus padding). Tall non-chat pages scroll
+    // inside <main>, never the page.
+    // Mobile (<sm) tightens the gutters (px-2 pt-2 pb-3) so the rail + one
+    // full-width column fit a 375px viewport; sm+ keeps the original frame.
+    <div className="fixed inset-0 flex justify-center px-2 sm:px-6 lg:px-8 pt-2 sm:pt-4 pb-3 sm:pb-8 bg-[color:var(--color-canvas)] overflow-hidden">
       <NotificationsHook initialUnread={unreadTotal} />
       <UnreadSync count={unreadTotal} />
-      <aside className="w-[260px] shrink-0 border-r border-[color:var(--color-line)] bg-[color:var(--color-paper)] flex flex-col">
-        <div className="px-4 py-3 border-b border-[color:var(--color-line)] flex items-center justify-between">
-          <Link href="/app" className="flex items-center gap-2 font-semibold text-sm">
-            <span
-              className="inline-flex w-6 h-6 rounded-md text-white text-[11px] items-center justify-center"
-              style={{
-                background:
-                  "linear-gradient(135deg, #2f3437 0%, #4a5054 60%, #787774 100%)",
-              }}
-            >
-              A2
-            </span>
-            <span>Agent2Agent</span>
-          </Link>
-          <Link href="/app/settings" className="btn btn-ghost btn-sm" title="Settings">
-            ⚙
-          </Link>
-        </div>
-
-        <form action="/app/search" method="get" className="px-3 pt-3">
-          <input
-            name="q"
-            className="input !py-1.5 !text-[13px]"
-            placeholder="Search messages…"
-          />
-        </form>
-        <nav className="px-2 py-3 text-[14px]">
-          <SidebarLink href="/app" icon="🏠" label="Home" />
-          <SidebarLink
-            href="/app/contacts"
-            icon="👥"
-            label="Contacts"
-            badge={incoming.length || undefined}
-          />
-          <SidebarLink href="/app/agents" icon="🤖" label="My agents" />
-          <SidebarLink href="/app/search" icon="🔎" label="Search" />
-        </nav>
-
-        {pinned.length > 0 ? (
-          <SidebarSection title="Pinned">
-            {pinned.map((c) => <ConvLink key={c.conversation.id} bundle={c} />)}
-          </SidebarSection>
-        ) : null}
-
-        <SidebarSection title="Conversations">
-          {active.length === 0 ? (
-            <div className="px-3 py-2 text-[13px] text-[color:var(--color-ink-soft)]">
-              No conversations yet.
-            </div>
-          ) : (
-            active.map((c) => <ConvLink key={c.conversation.id} bundle={c} />)
-          )}
-        </SidebarSection>
-
-        {archived.length > 0 ? (
-          <details className="px-2 py-3 border-t border-[color:var(--color-line)]">
-            <summary className="px-2 mb-1 text-[10px] uppercase tracking-wider font-medium text-[color:var(--color-ink-soft)] cursor-pointer hover:text-[color:var(--color-ink)]">
-              Archived ({archived.length})
-            </summary>
-            <div className="flex flex-col">
-              {archived.map((c) => <ConvLink key={c.conversation.id} bundle={c} />)}
-            </div>
-          </details>
-        ) : null}
-
-        <SidebarSection title="My agents">
-          {agents.length === 0 ? (
-            <Link
-              href="/app/agents/new"
-              className="block px-3 py-2 text-[13px] text-[color:var(--color-tint-blue-ink)] hover:underline"
-            >
-              + Create your first agent
-            </Link>
-          ) : (
-            agents.map((a) => (
-              <Link
-                key={a.id}
-                href={`/app/agents/${a.id}`}
-                className="flex items-center gap-2 px-2 py-1.5 rounded-md text-[13px] hover:bg-[color:var(--color-canvas)] transition-colors"
-              >
-                <span>{a.avatar_emoji}</span>
-                <span className="truncate font-mono text-[12px]">{a.id}</span>
-              </Link>
-            ))
-          )}
-        </SidebarSection>
-
-        <div className="mt-auto px-3 py-3 border-t border-[color:var(--color-line)] flex items-center justify-between gap-2">
-          <Link
-            href="/app/me"
-            className="flex items-center gap-2 min-w-0 hover:bg-[color:var(--color-canvas)] rounded-md px-1.5 py-1 -mx-1.5 transition-colors"
-            title="Edit profile"
-          >
-            {userAvatar ? (
-              <img
-                src="/api/v1/avatars/me"
-                alt=""
-                className="w-7 h-7 rounded-full object-cover border border-[color:var(--color-line)]"
-              />
-            ) : (
-              <div className="w-7 h-7 rounded-full bg-[color:var(--color-tint-blue)] flex items-center justify-center text-sm">
-                🧑
-              </div>
-            )}
-            <div className="text-[12px] min-w-0">
-              <div className="font-medium truncate max-w-[140px]">
-                {user.display_name}
-              </div>
-              <div className="text-[11px] text-[color:var(--color-ink-soft)] truncate max-w-[140px]">
-                {user.email}
-              </div>
-            </div>
-          </Link>
-          <form action={logoutAction}>
-            <button className="btn btn-ghost btn-sm" title="Log out">
-              ↪
-            </button>
-          </form>
-        </div>
-      </aside>
-
-      <main className="flex-1 min-w-0">{children}</main>
-    </div>
-  );
-}
-
-function SidebarLink({
-  href,
-  icon,
-  label,
-  badge,
-}: {
-  href: string;
-  icon: string;
-  label: string;
-  badge?: number;
-}) {
-  return (
-    <Link
-      href={href}
-      className="flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-[color:var(--color-canvas)] transition-colors"
-    >
-      <span className="flex items-center gap-2">
-        <span aria-hidden>{icon}</span>
-        <span>{label}</span>
-      </span>
-      {badge ? (
-        <span className="text-[10px] font-mono px-1.5 rounded-full bg-[color:var(--color-tint-amber-ink)] text-white">
-          {badge}
-        </span>
-      ) : null}
-    </Link>
-  );
-}
-
-function ConvLink({
-  bundle,
-}: {
-  bundle: {
-    conversation: { id: string; type: "direct" | "group"; title: string | null };
-    member_agent_ids: string[];
-    my_agent_id: string;
-    last_message: { text: string; created_at: number } | null;
-    unread_count: number;
-    state: { pinned_at: number | null; muted_at: number | null; archived_at: number | null };
-    workspace_count: number;
-    open_task_count: number;
-    my_open_task_count: number;
-  };
-}) {
-  const c = bundle;
-  const display =
-    c.conversation.type === "group"
-      ? c.conversation.title ?? "Untitled group"
-      : (() => {
-          const other = c.member_agent_ids.find((id) => id !== c.my_agent_id);
-          return other ?? "Direct";
-        })();
-  const showBadge = c.unread_count > 0 && !c.state.muted_at;
-  return (
-    <Link
-      href={`/app/c/${c.conversation.id}`}
-      className="block px-2 py-2 rounded-md text-[13px] hover:bg-[color:var(--color-canvas)] transition-colors"
-    >
-      <div className="flex items-center justify-between gap-1">
-        <span className="truncate flex items-center gap-1">
-          {c.state.pinned_at ? <span className="text-[9px]" title="pinned">📌</span> : null}
-          {c.state.muted_at ? <span className="text-[9px]" title="muted">🔕</span> : null}
-          <span className="truncate">{display}</span>
-        </span>
-        {showBadge ? (
-          <span className="text-[10px] font-mono px-1.5 rounded-full bg-[color:var(--color-tint-blue-ink)] text-white">
-            {c.unread_count}
-          </span>
-        ) : null}
+      {/* Wider frame (smaller side gutters), with the vertical padding biased
+          toward the bottom (sm:pt-4 / sm:pb-8) so there's more breathing room
+          below the app than above it. */}
+      <div className="flex gap-2.5 w-full h-full max-w-[1840px]">
+        <SidebarRail
+          items={rail}
+          avatarSrc={userAvatar ? "/api/v1/avatars/me" : null}
+          userInitial={user.display_name.charAt(0).toUpperCase()}
+          userName={user.display_name}
+          userEmail={user.email}
+          onLogout={logoutAction}
+        />
+        <SidebarPanel
+          pinned={pinned}
+          active={active}
+          archived={archived}
+          searchAction="/app/search"
+        />
+        <main className="flex-1 min-w-0 h-full overflow-y-auto">{children}</main>
       </div>
-      {c.last_message ? (
-        <div className="text-[11px] text-[color:var(--color-ink-soft)] truncate mt-0.5">
-          {c.last_message.text || "(file/context)"}
-        </div>
-      ) : null}
-      {c.workspace_count > 0 || c.open_task_count > 0 ? (
-        <div className="flex items-center gap-1.5 mt-1">
-          {c.workspace_count > 0 ? (
-            <span
-              className="text-[10px] px-1.5 py-px rounded-full bg-[color:var(--color-tint-violet)] text-[color:var(--color-tint-violet-ink)]"
-              title={`${c.workspace_count} workspace(s)`}
-            >
-              📁 {c.workspace_count}
-            </span>
-          ) : null}
-          {c.my_open_task_count > 0 ? (
-            <span
-              className="text-[10px] px-1.5 py-px rounded-full bg-[color:var(--color-tint-amber)] text-[color:var(--color-tint-amber-ink)] font-medium"
-              title={`${c.my_open_task_count} open task(s) assigned to your agents`}
-            >
-              ✅ {c.my_open_task_count} mine
-            </span>
-          ) : c.open_task_count > 0 ? (
-            <span
-              className="text-[10px] px-1.5 py-px rounded-full bg-[color:var(--color-tint-green)] text-[color:var(--color-tint-green-ink)]"
-              title={`${c.open_task_count} open task(s)`}
-            >
-              ✅ {c.open_task_count}
-            </span>
-          ) : null}
-        </div>
-      ) : null}
-    </Link>
-  );
-}
-
-function SidebarSection({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="px-2 py-3 border-t border-[color:var(--color-line)]">
-      <div className="px-2 mb-1 text-[10px] uppercase tracking-wider font-medium text-[color:var(--color-ink-soft)]">
-        {title}
-      </div>
-      <div className="flex flex-col">{children}</div>
     </div>
   );
 }

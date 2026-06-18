@@ -2,7 +2,7 @@
 title: 架构
 type: architecture
 status: living
-last_updated: 2026-05-11
+last_updated: 2026-06-11
 tags: [架构, 数据模型]
 links: [[INDEX]], [[FEATURES]], [[API]], [[SECURITY]]
 ---
@@ -29,7 +29,7 @@ graph TB
     PROXY[proxy.ts<br/>CSP / CORS / 安全 headers]
     APP[App Router 页面<br/>Server Components]
     API[/api/v1/* 路由处理器/]
-    BRAIN[brains.ts<br/>mock / anthropic / openai]
+    BRAIN[brains.ts<br/>mock / anthropic / openai / a2a]
     QUEUE[reply_jobs<br/>进程内 worker]
     DB[(SQLite + WAL)]
     BLOBS[(blobs/ 文件系统)]
@@ -45,7 +45,7 @@ graph TB
   APP -- onMessageSent hook --> QUEUE
   API -- onMessageSent hook --> QUEUE
   QUEUE --> BRAIN
-  BRAIN -. 可选 .-> EXT["Anthropic / OpenAI<br/>(只在配 API key 时)"]
+  BRAIN -. 可选 .-> EXT["Anthropic / OpenAI 兼容端点 /<br/>远程 A2A agent (配 key 或 connect-by-URL 时)"]
   QUEUE --> DB
 
   BR -. SSE .- API
@@ -65,6 +65,7 @@ Permissions-Policy。跨域 `fetch` 打 `/api/*` 会被拒绝，除非带
 - `cookies()` 始终 `await`（Next.js 15+ 异步 API）
 - 单一布局 `app/app/layout.tsx`，带侧栏
 - 对话视图（`components/ConversationView.tsx`）是 Client Component，因为要 polling/SSE + composer 状态
+- workspace 文件查看器的 markdown 渲染走 `components/MarkdownDoc.tsx`（Server Component，块级文档渲染：标题/列表/表格/代码块；inline 复用聊天的 MessageMarkdown，未知语法退化为纯段落）
 
 ### 3. Agent API — `app/api/v1/*`
 REST + JSON，鉴权 `Authorization: Bearer <api_key>`。完整接口见 [[API]]。
@@ -91,6 +92,12 @@ REST + JSON，鉴权 `Authorization: Bearer <api_key>`。完整接口见 [[API]]
 | `avatars.ts` | Avatar 上传 + 服务 |
 | `ephemeral.ts` | 内存里的一次性 secret 存储（新建的 API key） |
 | `api-auth.ts` | Bearer 解析 + JSON helpers |
+| `a2a-client.ts` | 出站 A2A 客户端（v0.21）：SSRF 守卫、远程 agent card 抓取/消毒/JWS 验签、message/send 中继（brain provider "a2a"） |
+| `task-command.ts` | 聊天 `/task` 命令解析（v0.23）：@ 门控指派 + 确认消息，详见 [[TASKS]] |
+| `inbox.ts` | Agent Inbox 只读聚合（v0.21）：handoff / agent link / 好友请求 / 待审 task / device auth 五类"等我处理"，不做任何 accept/decline |
+
+> [!note] 这张表只列横切的核心层
+> v0.5 起的领域模块——`tasks.ts`、`workspaces.ts`、`grants.ts`、`handoffs.ts`、`a2a.ts`、`autonomous.ts`、`auto-reviewer.ts`、`sandbox.ts`、`tools.ts` 等——各自有专题文档，入口见 [[INDEX]]。
 
 ### 5. 存储
 - `data/a2a.db` — SQLite WAL 模式。所有关系型状态。
@@ -157,9 +164,9 @@ erDiagram
 
 ```bash
 npm install        # ~30 秒
-npm run dev        # localhost:3000（本仓库用 PORT=3001）
+npm run dev        # localhost:3000
 npm run build      # Turbopack 生产构建
-npm test           # 跑 node:test 测试套件（18 项）
+npm test           # 跑 node:test 测试套件（391 项）
 ```
 
 `data/` 和 `blobs/` 第一次请求时自动创建。Schema 是幂等的 —

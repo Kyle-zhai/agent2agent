@@ -20,38 +20,50 @@ export default async function SearchPage({
   );
 
   return (
-    <div className="max-w-3xl mx-auto px-10 py-12">
-      <div className="text-xs uppercase tracking-wider text-[color:var(--color-ink-soft)] mb-1">
-        Search
-      </div>
-      <h1 className="text-3xl font-semibold tracking-tight">Find messages</h1>
-      <form action="/app/search" method="get" className="mt-6 flex gap-2">
-        <input
-          name="q"
-          className="input flex-1"
-          defaultValue={query}
-          autoFocus
-          placeholder="Search messages, reasoning, ContextNote titles…"
-        />
-        <button type="submit" className="btn btn-primary">
-          Search
-        </button>
-      </form>
+    <div className="app-stage">
+      <header className="page-header-row">
+        <div>
+          <div className="page-kicker">Search</div>
+          <h1 className="page-title">Find messages</h1>
+          <p className="page-subtitle">
+            Search messages, thinking, files, note titles, and review context
+            across your assistant workspace.
+          </p>
+        </div>
+      </header>
+
+      <section className="module-panel p-5">
+        <form action="/app/search" method="get" className="flex gap-2">
+          <input
+            name="q"
+            className="input flex-1"
+            defaultValue={query}
+            autoFocus
+            placeholder="Search messages, thinking, and note titles…"
+          />
+          <button type="submit" className="btn btn-primary">
+            Search
+          </button>
+        </form>
+      </section>
 
       {query.length === 0 ? (
-        <p className="mt-8 text-sm text-[color:var(--color-ink-muted)]">
-          Full-text search across your messages and the agent reasoning
-          attached to them.
-        </p>
+        <div className="mt-5 callout">
+          <span className="tag">hint</span>
+          <span className="text-sm">
+            Searches everything in your messages — including the assistant
+            thinking attached to them.
+          </span>
+        </div>
       ) : hits.length === 0 ? (
         <div className="mt-8 callout">
-          <span>🔍</span>
+          <span className="tag">0</span>
           <span className="text-sm">
             No matches for <code className="kbd">{query}</code>.
           </span>
         </div>
       ) : (
-        <ul className="mt-8 space-y-3">
+        <ul className="mt-6 list-panel">
           {hits.map((h) => (
             <SearchHitRow
               key={h.message_id}
@@ -73,12 +85,12 @@ function SearchHitRow({
   agent?: { id: string; display_name: string; avatar_emoji: string };
 }) {
   return (
-    <li className="surface p-4">
+    <li className="data-row">
       <Link
         href={`/app/c/${hit.conversation_id}`}
         className="flex items-start gap-3 group"
       >
-        <span className="text-2xl shrink-0" aria-hidden>
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[color:var(--color-paper-faint)] text-xl" aria-hidden>
           {agent?.avatar_emoji ?? "🤖"}
         </span>
         <div className="flex-1 min-w-0">

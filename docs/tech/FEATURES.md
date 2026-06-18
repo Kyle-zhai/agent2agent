@@ -2,9 +2,9 @@
 title: 功能清单
 type: feature-status
 status: living
-last_updated: 2026-05-11
+last_updated: 2026-06-11
 tags: [功能, 状态]
-links: [[INDEX]], [[ARCHITECTURE]], [[ROADMAP]]
+links: [[INDEX]], [[ARCHITECTURE]], [[ROADMAP]], [[HANDOFFS]], [[GRANTS]], [[A2A_PROTOCOL]]
 ---
 
 # 功能 — 状态表
@@ -29,9 +29,11 @@ links: [[INDEX]], [[ARCHITECTURE]], [[ROADMAP]]
 | 改邮箱 | ❌ | | 需要验证流程 |
 | **改密码** | ✅ *(v0.4.1)* | `/app/me` | 成功后让其他 session 失效 |
 | 2FA / TOTP | 💡 | | 上线后做 |
-| OAuth（Google / GitHub） | 💡 | | 需要外部 app 注册 |
-| 微信 / Instagram 联系人导入 | 💡 | 见原始 spec §12 | per-platform OAuth + API |
+| **OAuth 登录（5 provider）** | ✅ *(v0.9)* | `lib/oauth.ts` + `app/api/oauth/[provider]/**` | 见 [[OAUTH]]。Google/GitHub/Apple/WeChat/Instagram；state MAC + httpOnly nonce 防 CSRF；多绑/解绑 |
 | HIBP 密码泄露检查 | 💡 | | 注册/改密码时一次外网 HTTP |
+| **自助密码找回** | ✅ *(v0.26)* | `/forgot` → `/reset` + `lib/account-email.ts` | 一次性 token（sha256 存、1h TTL）+ 防枚举 + 重置即吊销全部会话；限流 per-IP+global |
+| **邮箱验证** | ✅ *(v0.26)* | 注册自动发 + `/verify-email` | `users.email_verified_at`；登录门禁可选（`A2A_REQUIRE_EMAIL_VERIFICATION=1`，默认关）|
+| **可插拔 mailer（零依赖）** | ✅ *(v0.26)* | `lib/mailer.ts` | `console`（默认，dev 零配置）/ `resend`（HTTP API）/ `webhook`；无 SMTP 库 |
 
 ## Agent
 
@@ -46,7 +48,7 @@ links: [[INDEX]], [[ARCHITECTURE]], [[ROADMAP]]
 | 删除 agent | ✅ | 级联删除消息、好友、待投递 | |
 | Agent 活动审计 | ✅ | settings 审计日志显示每个事件 | |
 | Per-agent 活动 sparkline | ❌ | | 信任信号，nice-to-have |
-| Agent 能力声明 | ❌ | | 其他 agent 可以发现它能做什么 |
+| Agent 能力声明 | ✅ *(v0.16)* | `PUT /agents/me/capabilities` → 喂进 A2A AgentCard `skills[]` | 其他 agent 通过 [[A2A_PROTOCOL]] 的 `/.well-known/agent-card.json` 发现它能做什么 |
 
 ## 好友 / 联系人
 
@@ -102,7 +104,7 @@ links: [[INDEX]], [[ARCHITECTURE]], [[ROADMAP]]
 | **群成员增删** | ✅ *(v0.4.1)* | 顶栏菜单 → "Manage members"（仅 owner） | |
 | **离开群** | ✅ *(v0.4.1)* | 顶栏菜单（非 owner） | owner 只能删群 |
 | **Per-chat persona override** | ✅ *(v0.4.2 后端 + v0.4.4 UI)* | 头部菜单 🎭 | 同一 managed agent 在不同 conv 不同人设 |
-| 群邀请链接 | 💡 | | 上线后 |
+| **邀请链接（base64url + 自动加好友）** | ✅ *(v0.9)* | `invite_links` / `invite_redemptions` + OAuth callback 自动 befriend | 见 [[OAUTH]]。132-bit code，限次/限时/拒重复 |
 
 ## 托管 agent 自主性
 
@@ -116,7 +118,7 @@ links: [[INDEX]], [[ARCHITECTURE]], [[ROADMAP]]
 | **@mention 提升 cooldown 到 8** | ✅ *(v0.4.2)* | 仅人类来源的 @ 才放宽 | |
 | **Reply-failed 可见** | ✅ *(v0.4.6)* | 失败时审计 + SSE 事件 + UI 警示条 | |
 | **Per-conversation persona override** | ✅ *(v0.4.4)* | 头部菜单设置 | |
-| Tool calling（搜索 / 代码执行） | 💡 | | 需要沙箱 + 工具注册表 |
+| **Tool calling（MCP 风格 + 沙箱执行）** | ✅ *(v0.7–v0.8)* | `lib/tools.ts`（8 工具）+ `lib/sandbox*`（test_command） | 见同表「MCP 风格 tool 调用通道」行；代码执行经 success_criteria `test_command` 在沙箱跑 |
 | Cross-conversation agent memory | 💡 | | 需要持久 RAG |
 | 回复门禁（高门槛时需主人 OK） | ❌ | | 外部 agent 是这么做的；托管 agent 暂时直接发 |
 
@@ -187,15 +189,68 @@ links: [[INDEX]], [[ARCHITECTURE]], [[ROADMAP]]
 | Task 创建 / 列表 / 详情 | ✅ *(v0.5)* | `/app/c/{id}/tasks` + `/api/v1/tasks` | |
 | Task 状态机（7 状态） | ✅ *(v0.5)* | `lib/tasks.ts` 的 `TRANSITIONS` | 服务端强制 |
 | Capability 声明 / 校验 | ✅ *(v0.5)* | `PUT /agents/me/capabilities` | assign 前 check |
-| Success criteria DSL | 🟡 *(v0.5)* | `capability_check` / `diff_pattern` / `diff_review` / `manual` ✅；`test_command` ❌（v0.6 沙箱） | |
+| Success criteria DSL | ✅ *(v0.5–v0.8)* | `capability_check` / `diff_pattern` / `diff_review` / `manual` / `debate_panel` / `test_command`（v0.8 沙箱）全部 ✅ | snapshot 绑定 task workspace（v0.18 越权修复） |
 | Approve / request_changes | ✅ *(v0.5)* | UI + `PATCH /tasks/:id` | owner 不能自批 |
 | Patch 自动挂为 task artifact | ✅ *(v0.5)* | `task_artifacts.kind = snapshot` | |
 | Task events 时间线 | ✅ *(v0.5)* | 9 种 event kind | UI 完整渲染 |
 | install.md 新 skill（workspace_*.sh / task_*.sh） | ✅ *(v0.5)* | `app/install.md/route.ts` | 安装时自动 PUT capabilities |
-| 自动 reviewer agent | ❌ | | 见 AUTONOMOUS_DESIGN v0.7 |
-| WebSocket 双工 + cursor replay | ❌ | | 见 AUTONOMOUS_DESIGN v0.6 |
-| MCP tool 调用通道 | ❌ | | v0.6 |
-| Vercel Sandbox 跑 shell.run | ❌ | | v0.6 |
+| **自主任务循环（无人值守跑完）** | ✅ *(v0.19)* | `lib/autonomous.ts` `runAutonomousTask` / `tickAutonomousAgents` | 有界 ReAct：context→brain→`<write>`→`<submit/>`；deterministic criteria 把关 + 失败反馈重试；step/wall-clock 上限 + stuck 检测 + `<blocked>` 升级；review-gated 不自批准；`A2A_AUTONOMY_TICK=1` 开自唤醒 |
+| **Diff 感知（看到对方改了什么）** | ✅ *(v0.19)* | `recentWorkspaceChangesForAgent` + `workspace.diff` 工具 | heartbeat `workspace_changes`（`?changes_since`）+ managed `buildBrainContext` peerChanges；`workspace.diff` 给行级 |
+| **Workspace 自动 rebase + 三方合并** | ✅ *(v0.19–v0.20)* | `lib/workspaces.ts` `applyPatch` + `lib/merge3.ts` | 不同文件改动自动 replay（`rebased_from`）；**同文件不同行用 vendor 手写 diff3 自动合并**；同行真冲突/二进制/CRLF 仍 409 进 `/resolve` |
+| 自动 reviewer agent | ✅ *(v0.11)* | `lib/auto-reviewer.ts` | awaiting_review + diff_review criterion 时 fire-and-forget 评 diff |
+| events session 协议（JOIN + cursor + SSE） | ✅ *(v0.6)* | `/api/v1/sessions/*` | WS 等价语义 |
+| MCP 风格 tool 调用通道 | ✅ *(v0.7)* | `lib/tools.ts` + `POST /tools/invoke` | 8 内置工具 + 反向 RPC（v0.12） |
+| Vercel Sandbox 跑 test_command | ✅ *(v0.8)* | `lib/sandbox*` | 本地 child_process 回退 + Vercel Sandbox 远端 |
+
+## 跨用户协作 / 互联（v0.15–v0.18 新加）
+
+| 功能 | 状态 | 位置 | 备注 |
+|---|:--:|---|---|
+| **定向 handoff（脱敏 + 双重 opt-in）** | ✅ *(v0.15)* | `lib/handoffs.ts` + `HandoffPanel.tsx` + `HandoffCard.tsx` | 见 [[HANDOFFS]]。from_user 提议、**只有** to_user 能 accept/decline；`filterPrivateContent` 分享前脱敏且从不静默丢弃（计入 `redaction_count` + `private_summary`）；UI 实时预览镜像服务端 filter；scope 预设 👀 Look / 💬 Discuss / ✍️ Co-edit + 时长 1h/24h/7d/Never |
+| **Capability-scoped grants（mint / verify / REVOKE）** | ✅ *(v0.16)* | `lib/grants.ts` + `lib/crypto.ts` + `shared_grants` 表 | 见 [[GRANTS]]。UCAN-inspired，HMAC-SHA256 签名、scope-bound（read\|comment\|write\|admin）、resource-pinned、time-limited；`verifyGrantForUse` = scope + 签名重算（测 DB 篡改）+ active + 戳 `last_used_at`；granter 或 recipient 均可 revoke；handoff complete 时级联回收 |
+| **Grant enforcement（已接线、现强制）** | ✅ *(v0.16)* | `lib/tools.ts`、workspace patches/read 路由 | 见 [[GRANTS]]。`findUsableGrant()` / `agentMayUseResource()` 让调用点门禁 "订阅角色 OR 有效 grant"；co-edit handoff 真能写，revoke 即断写留读（这是之前 grant 形同虚设的 headline gap，现已关闭） |
+| **A2A v0.3.0 协议桥** | ✅ *(v0.16)* | `lib/a2a.ts` + `app/api/v1/agents/[id]/a2a/route.ts` + `.well-known/agent-card.json/route.ts` | 见 [[A2A_PROTOCOL]]。实现开放的 "Agent2Agent (A2A) protocol" v0.3.0 JSON-RPC binding（Linux Foundation）；AgentCard + `/.well-known/agent-card.json` 发现；`message/send`（建真 task，`tasks/get` round-trip）+ **streaming**（`message/stream`/`tasks/resubscribe` SSE）+ **push**（`pushNotificationConfig/*` + `a2a_push_configs` 表）+ **extended card**（`agent/getAuthenticatedExtendedCard`，认证后加 handoff skill） |
+| **Own-agent dock** | ✅ *(v0.16)* | `components/OwnAgentDock.tsx` + `lib/own-agent-chat.ts` | 直接对自己 agent 提问的常驻入口 |
+| **Collab-first 侧栏** | ✅ *(v0.16)* | `components/SidebarRail.tsx` + `SidebarPanel.tsx` | rail + 面板，把协作放在导航第一位 |
+| **A2A v1.0 双方言** | ✅ *(v0.18)* | `lib/a2a.ts`（§dialects）+ a2a route | 见 [[A2A_PROTOCOL]] §9。同端点讲 v0.3 + v1.0：PascalCase 方法别名（`SendMessage`…）、ProtoJSON 投影、成员式 Part 入站兼容、`supportedInterfaces[]` 双通告、`ListTasks` 游标分页 |
+| **JWS 签名 Agent Card** | ✅ *(v0.18)* | `lib/card-signing.ts` + `/.well-known/jwks.json` | JCS (RFC 8785) + ES256 detached JWS（RFC 7515）；`A2A_CARD_SIGNING_KEY` 开关，未设置则卡片不带签名 |
+| **签名 push webhook** | ✅ *(v0.17)* | `lib/a2a.ts` `firePushForTask` + `lib/crypto.ts` | `x-a2a-signature/timestamp/request-id` + **Standard Webhooks** 头双轨；密钥即 pushNotificationConfig `token` |
+| **`message/send` 幂等** | ✅ *(v0.17)* | `lib/a2a.ts` + `a2a_idempotency` 表 | 按 spec `Message.messageId` 以 (caller, target, messageId) 去重，重放返回原 task |
+| **Device-auth 接入** | ✅ *(v0.17)* | `lib/device-auth.ts` + `/api/v1/auth/device{,/poll}` + `/app/device` | RFC 8628 形：本地 agent 出 code → 人类浏览器审批 → key 一次性投递后销毁行内明文；15 分钟 TTL |
+| **一键 Skill 接入** | ✅ *(v0.17)* | `GET /skill.md`（`app/skill.md/route.ts`） | 粘一句 "Read {base}/skill.md and follow it" 给 Claude Code/OpenClaw/Cursor，自动完成 device-auth + 装全套技能 |
+| **A2A 出站客户端（按 URL 连接远端 agent）** ★ | ✅ *(v0.21)* | `lib/a2a-client.ts` + `/app/agents/connect` "remote" 区块 + brain provider `a2a` | 见 [[A2A_PROTOCOL]] §10.2。拉远端卡片（SSRF 闸 + sanitize）→ JWS 验签（verified/unsigned/invalid 徽章，invalid 默认阻断）→ 创建代理 agent → relay `message/send` + `tasks/get` 轮询（45s 预算 < 60s lease）；失败走"agent 放弃了"可见路径；卡片文本永不进 LLM prompt（防 card poisoning） |
+| **平台级 origin Agent Card** | ✅ *(v0.21)* | `app/.well-known/agent-card.json/route.ts` | 平台总卡 + deny-by-default 公开目录（`A2A_PUBLIC_AGENT_IDS` 点名且仅 managed；目录挂 `urn:agent2agent:platform-directory` 扩展）；JWS 签名复用 |
+| **`tasks/get` historyLength** | ✅ *(v0.21)* | `lib/a2a.ts` | TCK 头号常缺项；时间序尾部最近 N 条，非法值 `-32602`，两方言共享 |
+| **`application/a2a+json` media type** | ✅ *(v0.21)* | a2a route | spec v1.0.1 注册类型；入站两种均收、JSON-RPC 响应回 a2a+json |
+| **A2A 入站上限** | ✅ *(v0.21)* | `lib/a2a.ts` | parts ≤20、text ≤8000，先于任何 DB 写拒绝（`-32602`） |
+| **Agent Inbox（统一待办）** | ✅ *(v0.21)* | `lib/inbox.ts` + `/app/inbox` + rail 角标 | 5 类待办聚合（handoffs/互连/好友请求/awaiting_review/设备审批），只聚合不审批，每项链回原处理处；角标服务端计数、零隐藏 |
+
+| **文件就地查看器（Lark 式分类型渲染）** | ✅ *(v0.21+)* | workspace 详情页 `?open=` + `components/MarkdownDoc.tsx` | Markdown 文档化（标题/列表/表格/代码块）、CSV 表格、图片内联、代码行号、⬇ 下载（files 路由 cookie 双轨）；只读 —— 编辑仍归 assistant 工具 |
+| **全界面办公软件化文案** | ✅ *(v0.21+)* | 全部 app 页面 + 组件 | assistant/hosted/Model/Instructions/Connection/version 等词表统一；Access 权限术语保留；仅显示层 |
+
+| **聊天内建任务（`/task` + @ 指派门控）** | ✅ *(v0.21+)* | `lib/task-command.ts` + 聊天 composer | 聊天里输 `/task 标题 @assistant` 直接建任务；**只有被 @ 的成员助手才被指派**，无 @ = 人类备忘、无助手行动；原始命令不进聊天记录，发布的是确认消息（@ 会提醒被指派者）；18 测试 |
+| **New task 表单移除（任务创建全面入聊）** | ✅ *(v0.21+)* | tasks 页 | 应用户要求表单整体删除；tasks 页只做跟踪/审核 + `/task` 提示卡；机器完成校验（success_criteria）仍可由助手经 API/tools 设置 |
+
+| **UX 批次：Enter 发送 + 草稿 + 图片放大 + 查看器导航 + 移动端急救** | ✅ *(v0.24)* | ConversationView / OwnAgentDock / workspace 页 / shell | Enter 即发送（Shift+↵ 换行，**IME 守卫**：中文候选确认永不误发）；按会话草稿（localStorage）；图片 dialog lightbox；查看器 ‹Prev/Next› + n/N + 文件夹自动展开；375px 可用（聊天室全宽、dock 默认收起）；错误横幅可关 + 8s 自动淡出；完整审计见 [[UX_AUDIT]] |
+
+| **账号删除（Danger zone）** | ✅ *(v0.25)* | Settings 页 + `lib/users.ts deleteUserAccount` | 邮箱确认 + 单事务级联（逐 agent 级联 → sessions/oauth/invites/audit/users）；8 测试含跨用户隔离断言 |
+| **操作员密码重置 CLI** | ✅ *(v0.25)* | `npm run reset-password -- <email> <pw>` | 注册同强度校验 + scrypt + 清锁定 + 吊销全部会话 + 审计；登录页有提示；自助邮件找回仍 ❌（无邮件能力） |
+| **沙箱安全默认** | ✅ *(v0.25)* | `lib/sandbox.ts` | 默认 skipped；隔离（Vercel token）或本机（`A2A_SANDBOX_LOCAL=1` 显式 + 生产告警）均为 opt-in；`A2A_SANDBOX_DISABLE=1` 一票否决 |
+
+| **Handoff 的 agent-REST（本地 agent 自驱跨用户上下文）** | ✅ *(v0.25)* | `app/api/v1/handoffs/*` + heartbeat `pending_handoffs` | `POST /handoffs`(propose) / `POST /handoffs/:id/respond`(accept,decline) / `GET /handoffs`；accept 事务铸 grant+订阅+建 task；本地 agent 不再需要人去浏览器点（+10 测试）|
+
+| **grant 跨 REST 强制 + 冲突解决端点** | ✅ *(v0.25)* | `conversations/[id]/messages`、`tasks/[id]`、`workspaces/[id]/conflicts/resolve` | 会话读认 conv-grant、任务读/评论认 task-grant（handoff 铸的 grant 真生效，revoke 即断）；`POST …/conflicts/resolve` 让本地 agent 解 409（mine/theirs/merged）——co-edit 端到端打通（+7 测试）|
+
+| **安装层暴露 handoff（A1 收尾）** | ✅ *(v0.25)* | `install.md` / `openclaw.md` | `handoff_propose.sh` + `handoff_respond.sh` + OpenClaw 两工具 + heartbeat `pending_handoffs` 教程；本地 agent 经官方脚本即可自驱跨用户上下文 |
+| **task 创建授权收紧** | ✅ *(v0.25)* | `app/api/v1/tasks/route.ts` | workspace 须属本会话 + 发起方有 workspace 访问 + assignee 须在会话内 |
+| **task comment grant 入口对齐** | ✅ *(v0.25)* | `lib/task-access.ts`（PATCH + POST /comments 共用 `mayUseTask`）| 只持 comment-grant 的协作者两个入口都能评论 |
+
+## UI 主题
+
+| 功能 | 状态 | 位置 | 备注 |
+|---|:--:|---|---|
+| **Notion 浅色 editorial 主题** | ✅ *(v0.16)* | `app/globals.css` | 替换暗色 "Hermes Midnight" glassmorphism：warm-white 画布 `#f7f6f3` + near-black 墨 `#37352f` + Notion-blue accent `#2383e2`，hairline 边框、软低 shadow、无 glass/glow；token 名保留所以组件不改；**"Hermes" 名退役**，统一回 Agent2Agent |
+| **Home IA 简化** | ✅ *(v0.16)* | `app/app/page.tsx` | 5 张竞争 CTA 卡 → 1 个主 hero "Start a collaboration" + 安静的 "More ways to get started" 列表 |
 
 ## 运维
 
@@ -216,7 +271,7 @@ links: [[INDEX]], [[ARCHITECTURE]], [[ROADMAP]]
 | README | ✅ | 启动 + 技术栈 |
 | 技术文档（本目录） | ✅ *(v0.4)* | Obsidian 风，wikilinks |
 | Mermaid 图 | ✅ *(v0.4)* | 架构 + ER + 流程 |
-| **测试套件** | ✅ *(v0.5)* | `node:test + tsx`，37 项 passing（含 19 项 workspace/task） |
+| **测试套件** | ✅ *(v0.5)* | `node:test + tsx`，**175 项 passing**（含 workspace/task + handoffs + grants + a2a） |
 | OpenAPI spec | ❌ | 可以从 route handler 自动生成 |
 | Storybook 组件库 | ❌ | MVP 范围内不做 |
 | CI | ❌ | 测试有了，pipeline 没接 |

@@ -14,7 +14,7 @@ export { SUPPORTED_FRAMEWORKS } from "./types";
 export const MAX_AGENTS_PER_USER = 10;
 
 const AGENT_COLUMNS =
-  "id, owner_user_id, display_name, description, avatar_emoji, avatar_blob_path, api_key_prefix, framework, agent_kind, persona, brain_config_json, parent_agent_id, capabilities, last_seen_at, last_message_at, created_at";
+  "id, owner_user_id, display_name, description, avatar_emoji, avatar_blob_path, api_key_prefix, framework, agent_kind, persona, brain_config_json, parent_agent_id, capabilities, last_seen_at, last_message_at, created_at, a2a_card_verified";
 
 export function listAgentsForUser(userId: string): Agent[] {
   return db()
@@ -97,7 +97,59 @@ export function createAgentForUser(
 export function deleteAgentForUser(id: string, userId: string): void {
   const a = getAgentOwnedBy(id, userId);
   if (!a) throw new Error("Agent not found.");
-  db().prepare("DELETE FROM agents WHERE id = ?").run(id);
+  // 11 agents(id) FKs have NO `ON DELETE` clause, so a bare DELETE throws
+  // SQLITE_CONSTRAINT_FOREIGNKEY the moment the agent has any content. Clear
+  // every unguarded reference in ONE transaction, then delete the agent.
+  //   - nullable author refs → SET NULL (keep the row, drop attribution)
+  //   - NOT NULL author rows  → DELETE (the content goes with its author)
+  //   - conversations it created → hand off to another member, or delete if
+  //     it's the only member (don't nuke a shared room out from under peers)
+  // FKs WITH ON DELETE CASCADE/SET NULL (friend_requests, agent_links,
+  // handoffs, grants, sessions, reply_jobs, tool_*, invite_*, …) clean
+  // themselves up when the agent row finally goes.
+  const d = db();
+  const tx = d.transaction(() => {
+    for (const stmt of [
+      "UPDATE workspaces SET created_by_agent_id = NULL WHERE created_by_agent_id = ?",
+      "UPDATE workspace_snapshots SET created_by_agent_id = NULL WHERE created_by_agent_id = ?",
+      "UPDATE task_events SET actor_agent_id = NULL WHERE actor_agent_id = ?",
+      "UPDATE task_dependencies SET created_by_agent_id = NULL WHERE created_by_agent_id = ?",
+      "UPDATE task_artifacts SET added_by_agent_id = NULL WHERE added_by_agent_id = ?",
+      "UPDATE sandbox_runs SET initiated_by_agent_id = NULL WHERE initiated_by_agent_id = ?",
+    ]) {
+      d.prepare(stmt).run(id);
+    }
+    // Reassign or delete conversations this agent created.
+    const myConvs = d
+      .prepare("SELECT id FROM conversations WHERE created_by_agent_id = ?")
+      .all(id) as Array<{ id: string }>;
+    for (const c of myConvs) {
+      const other = d
+        .prepare(
+          "SELECT agent_id FROM conversation_members WHERE conversation_id = ? AND agent_id != ? LIMIT 1",
+        )
+        .get(c.id, id) as { agent_id: string } | undefined;
+      if (other) {
+        d.prepare("UPDATE conversations SET created_by_agent_id = ? WHERE id = ?").run(
+          other.agent_id,
+          c.id,
+        );
+      } else {
+        d.prepare("DELETE FROM conversations WHERE id = ?").run(c.id);
+      }
+    }
+    // NOT NULL author rows the agent owns (each cascades its own children).
+    for (const stmt of [
+      "DELETE FROM messages WHERE from_agent_id = ?",
+      "DELETE FROM attachments WHERE uploaded_by_agent_id = ?",
+      "DELETE FROM context_notes WHERE from_agent_id = ?",
+      "DELETE FROM tasks WHERE owner_agent_id = ?",
+    ]) {
+      d.prepare(stmt).run(id);
+    }
+    d.prepare("DELETE FROM agents WHERE id = ?").run(id);
+  });
+  tx();
 }
 
 export function rotateApiKey(

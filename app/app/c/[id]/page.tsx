@@ -35,8 +35,18 @@ import {
   respondAgentLink,
   revokeAgentLink,
 } from "@/lib/agent-links";
-import { listWorkspacesForConversation } from "@/lib/workspaces";
+import { listFiles, listWorkspacesForConversation } from "@/lib/workspaces";
 import { listTasksForConversation } from "@/lib/tasks";
+import { tryCreateTaskFromChat } from "@/lib/task-command";
+import {
+  listHandoffsForConversation,
+  proposeHandoff,
+  respondHandoff,
+  markHandoffCompleted,
+  withdrawHandoff,
+} from "@/lib/handoffs";
+import { getOwnAgentChannel } from "@/lib/own-agent-chat";
+import { OwnAgentDock } from "@/components/OwnAgentDock";
 import { ensureManagedAgentHooks } from "@/lib/managed-agents-init";
 import { ConversationView } from "@/components/ConversationView";
 import type { ReactionAggregate } from "@/lib/types";
@@ -77,7 +87,7 @@ async function sendMessageAction(formData: FormData) {
     } catch (err) {
       redirect(
         `/app/c/${conversationId}?error=${encodeURIComponent(
-          err instanceof Error ? err.message : "Attachment rejected.",
+          err instanceof Error ? err.message : "That file couldn't be attached.",
         )}`,
       );
     }
@@ -92,15 +102,29 @@ async function sendMessageAction(formData: FormData) {
     contextNoteId = cn.id;
   }
   try {
+    // Chat-first task creation: "/task What needs doing @assistant" turns
+    // into a real task instead of a chat message. Only an @-mentioned member
+    // assistant is assigned (no @ → human note, no assistant acts). The raw
+    // command is not posted — a plain confirmation is, so the room sees what
+    // happened (and the @ in it nudges the assignee).
+    const chatTask =
+      attachmentIds.length === 0 && !contextNoteId && !replyToId
+        ? tryCreateTaskFromChat({
+            conversation_id: conversationId,
+            author_agent_id: myAgentId,
+            text,
+          })
+        : ({ handled: false } as const);
     sendMessage(conversationId, myAgentId, {
-      text,
+      text: chatTask.handled ? chatTask.confirmation : text,
       thinking,
       attachment_ids: attachmentIds,
       context_note_id: contextNoteId,
       reply_to_message_id: replyToId,
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Send failed.";
+    const msg =
+      err instanceof Error ? err.message : "Couldn't send the message.";
     redirect(`/app/c/${conversationId}?error=${encodeURIComponent(msg)}`);
   }
   revalidatePath(`/app/c/${conversationId}`);
@@ -120,7 +144,7 @@ async function editMessageAction(formData: FormData) {
   } catch (err) {
     redirect(
       `/app/c/${conversationId}?error=${encodeURIComponent(
-        err instanceof Error ? err.message : "Edit failed.",
+        err instanceof Error ? err.message : "Couldn't save the edit.",
       )}`,
     );
   }
@@ -139,7 +163,7 @@ async function deleteMessageAction(formData: FormData) {
   } catch (err) {
     redirect(
       `/app/c/${conversationId}?error=${encodeURIComponent(
-        err instanceof Error ? err.message : "Delete failed.",
+        err instanceof Error ? err.message : "Couldn't delete the message.",
       )}`,
     );
   }
@@ -168,7 +192,7 @@ async function reactAction(formData: FormData) {
   } catch (err) {
     redirect(
       `/app/c/${conversationId}?error=${encodeURIComponent(
-        err instanceof Error ? err.message : "Reaction failed.",
+        err instanceof Error ? err.message : "Couldn't add the reaction.",
       )}`,
     );
   }
@@ -217,7 +241,7 @@ async function renameGroupAction(formData: FormData) {
   } catch (err) {
     redirect(
       `/app/c/${conversationId}?error=${encodeURIComponent(
-        err instanceof Error ? err.message : "Rename failed.",
+        err instanceof Error ? err.message : "Couldn't rename the group.",
       )}`,
     );
   }
@@ -236,7 +260,7 @@ async function addMemberAction(formData: FormData) {
   } catch (err) {
     redirect(
       `/app/c/${conversationId}?error=${encodeURIComponent(
-        err instanceof Error ? err.message : "Add failed.",
+        err instanceof Error ? err.message : "Couldn't add that member.",
       )}`,
     );
   }
@@ -265,7 +289,7 @@ async function addOwnAgentAction(formData: FormData) {
   } catch (err) {
     redirect(
       `/app/c/${conversationId}?error=${encodeURIComponent(
-        err instanceof Error ? err.message : "Add failed.",
+        err instanceof Error ? err.message : "Couldn't add your assistant.",
       )}`,
     );
   }
@@ -290,7 +314,9 @@ async function requestLinkAction(formData: FormData) {
   } catch (err) {
     redirect(
       `/app/c/${conversationId}?error=${encodeURIComponent(
-        err instanceof Error ? err.message : "Link request failed.",
+        err instanceof Error
+          ? err.message
+          : "Couldn't send the connection request.",
       )}`,
     );
   }
@@ -316,11 +342,12 @@ async function respondLinkAction(formData: FormData) {
   } catch (err) {
     redirect(
       `/app/c/${conversationId}?error=${encodeURIComponent(
-        err instanceof Error ? err.message : "Respond failed.",
+        err instanceof Error ? err.message : "Couldn't save your response.",
       )}`,
     );
   }
   revalidatePath(`/app/c/${conversationId}`);
+  revalidatePath("/app", "layout");
   redirect(`/app/c/${conversationId}`);
 }
 
@@ -335,7 +362,7 @@ async function revokeLinkAction(formData: FormData) {
   } catch (err) {
     redirect(
       `/app/c/${conversationId}?error=${encodeURIComponent(
-        err instanceof Error ? err.message : "Revoke failed.",
+        err instanceof Error ? err.message : "Couldn't remove the connection.",
       )}`,
     );
   }
@@ -363,7 +390,7 @@ async function removeMemberAction(formData: FormData) {
   } catch (err) {
     redirect(
       `/app/c/${conversationId}?error=${encodeURIComponent(
-        err instanceof Error ? err.message : "Remove failed.",
+        err instanceof Error ? err.message : "Couldn't remove that member.",
       )}`,
     );
   }
@@ -385,7 +412,7 @@ async function forwardAction(formData: FormData) {
   } catch {
     redirect(
       `/app/c/${sourceConvId}?error=${encodeURIComponent(
-        "You're not in that target conversation.",
+        "You're not a member of that conversation.",
       )}`,
     );
   }
@@ -404,7 +431,7 @@ async function forwardAction(formData: FormData) {
   } catch (err) {
     redirect(
       `/app/c/${sourceConvId}?error=${encodeURIComponent(
-        err instanceof Error ? err.message : "Forward failed.",
+        err instanceof Error ? err.message : "Couldn't forward the message.",
       )}`,
     );
   }
@@ -424,7 +451,7 @@ async function setPersonaOverrideAction(formData: FormData) {
   const owned = (await import("@/lib/agents")).getAgentOwnedBy(agentId, user.id);
   if (!owned) {
     redirect(
-      `/app/c/${conversationId}?error=${encodeURIComponent("Not your agent.")}`,
+      `/app/c/${conversationId}?error=${encodeURIComponent("That assistant isn't yours.")}`,
     );
   }
   try {
@@ -432,12 +459,158 @@ async function setPersonaOverrideAction(formData: FormData) {
   } catch (err) {
     redirect(
       `/app/c/${conversationId}?error=${encodeURIComponent(
-        err instanceof Error ? err.message : "Could not save override.",
+        err instanceof Error
+          ? err.message
+          : "Couldn't save the instructions for this chat.",
       )}`,
     );
   }
   revalidatePath(`/app/c/${conversationId}`);
   redirect(`/app/c/${conversationId}`);
+}
+
+async function proposeHandoffAction(formData: FormData) {
+  "use server";
+  const user = await requireUser();
+  const conversationId = String(formData.get("conversation_id") ?? "");
+  const fromAgentId = String(formData.get("from_agent_id") ?? "");
+  const toAgentId = String(formData.get("to_agent_id") ?? "");
+  const title = String(formData.get("title") ?? "");
+  const brief = String(formData.get("brief") ?? "");
+  const body = String(formData.get("body") ?? "");
+  const workspaceId =
+    String(formData.get("workspace_id") ?? "").trim() || null;
+  // Scope and duration chips from the panel; the proposeHandoff layer
+  // re-validates against the canonical lists.
+  const scopes = formData
+    .getAll("scopes")
+    .map((v) => String(v))
+    .filter((v): v is "read" | "comment" | "write" | "admin" =>
+      ["read", "comment", "write", "admin"].includes(v),
+    );
+  const durationKey = String(formData.get("duration_key") ?? "24h");
+  // Authorize: caller must be in conv via an agent they own; the from_agent
+  // must be theirs too. requireUserMember validates membership.
+  requireUserMember(conversationId, user.id);
+  try {
+    proposeHandoff({
+      conversation_id: conversationId,
+      from_user_id: user.id,
+      from_agent_id: fromAgentId,
+      to_agent_id: toAgentId,
+      title,
+      brief,
+      body,
+      workspace_id: workspaceId,
+      scopes: scopes.length > 0 ? scopes : undefined,
+      duration_key: durationKey,
+    });
+  } catch (err) {
+    redirect(
+      `/app/c/${conversationId}?error=${encodeURIComponent(
+        err instanceof Error ? err.message : "Couldn't send the handoff.",
+      )}`,
+    );
+  }
+  revalidatePath(`/app/c/${conversationId}`);
+  revalidatePath("/app", "layout");
+  redirect(`/app/c/${conversationId}`);
+}
+
+async function respondHandoffAction(formData: FormData) {
+  "use server";
+  const user = await requireUser();
+  const conversationId = String(formData.get("conversation_id") ?? "");
+  const handoffId = String(formData.get("handoff_id") ?? "");
+  const decision = String(formData.get("decision") ?? "") as
+    | "accept"
+    | "decline";
+  const note = String(formData.get("note") ?? "");
+  requireUserMember(conversationId, user.id);
+  try {
+    respondHandoff({
+      handoff_id: handoffId,
+      responding_user_id: user.id,
+      decision,
+      note,
+    });
+  } catch (err) {
+    redirect(
+      `/app/c/${conversationId}?error=${encodeURIComponent(
+        err instanceof Error
+          ? err.message
+          : "Couldn't save your response to the handoff.",
+      )}`,
+    );
+  }
+  revalidatePath(`/app/c/${conversationId}`);
+  revalidatePath("/app", "layout");
+  redirect(`/app/c/${conversationId}`);
+}
+
+async function withdrawHandoffAction(formData: FormData) {
+  "use server";
+  const user = await requireUser();
+  const conversationId = String(formData.get("conversation_id") ?? "");
+  const handoffId = String(formData.get("handoff_id") ?? "");
+  requireUserMember(conversationId, user.id);
+  try {
+    withdrawHandoff({ handoff_id: handoffId, user_id: user.id });
+  } catch (err) {
+    redirect(
+      `/app/c/${conversationId}?error=${encodeURIComponent(
+        err instanceof Error ? err.message : "Couldn't withdraw the handoff.",
+      )}`,
+    );
+  }
+  revalidatePath(`/app/c/${conversationId}`);
+  redirect(`/app/c/${conversationId}`);
+}
+
+async function completeHandoffAction(formData: FormData) {
+  "use server";
+  const user = await requireUser();
+  const conversationId = String(formData.get("conversation_id") ?? "");
+  const handoffId = String(formData.get("handoff_id") ?? "");
+  requireUserMember(conversationId, user.id);
+  try {
+    markHandoffCompleted({ handoff_id: handoffId, user_id: user.id });
+  } catch (err) {
+    redirect(
+      `/app/c/${conversationId}?error=${encodeURIComponent(
+        err instanceof Error
+          ? err.message
+          : "Couldn't mark the handoff as completed.",
+      )}`,
+    );
+  }
+  revalidatePath(`/app/c/${conversationId}`);
+  revalidatePath("/app", "layout");
+  redirect(`/app/c/${conversationId}`);
+}
+
+async function ownAgentSendAction(formData: FormData) {
+  "use server";
+  const user = await requireUser();
+  const dockConvId = String(formData.get("conversation_id") ?? "");
+  const text = String(formData.get("text") ?? "").trim();
+  if (!text) return;
+  // requireUserMember enforces that user actually owns one of the agents
+  // in the dock conv (it'll be the external one we set up).
+  const { myAgentId } = requireUserMember(dockConvId, user.id);
+  try {
+    sendMessage(dockConvId, myAgentId, { text });
+  } catch (err) {
+    // Surface back to the group conv URL since the dock has no error UI
+    // surface of its own — the user is reading the main conv.
+    redirect(
+      `/app?error=${encodeURIComponent(
+        err instanceof Error ? err.message : "Couldn't send the message.",
+      )}`,
+    );
+  }
+  revalidatePath(`/app/c/${dockConvId}`);
+  revalidatePath("/app", "layout");
 }
 
 async function leaveGroupAction(formData: FormData) {
@@ -450,7 +623,7 @@ async function leaveGroupAction(formData: FormData) {
   } catch (err) {
     redirect(
       `/app/c/${conversationId}?error=${encodeURIComponent(
-        err instanceof Error ? err.message : "Leave failed.",
+        err instanceof Error ? err.message : "Couldn't leave the group.",
       )}`,
     );
   }
@@ -539,12 +712,44 @@ export default async function ConversationPage({
 
   // Workspace & task counts so the chat header's pills can show numbers.
   const workspaces = listWorkspacesForConversation(id);
-  const openTaskCount = listTasksForConversation(id).filter(
+  const workspaceFiles =
+    workspaces[0]?.head_snapshot_id
+      ? listFiles(workspaces[0].head_snapshot_id)
+      : [];
+  const tasks = listTasksForConversation(id);
+  const openTaskCount = tasks.filter(
     (t) => t.status !== "done" && t.status !== "cancelled",
   ).length;
 
+  // v0.15 — handoffs. Recipient picker = members owned by SOMEONE ELSE.
+  // Sender (from_agent) defaults to "my preferred agent" (the same one
+  // requireUserMember picked) but UI can swap if user has multiple.
+  const handoffs = listHandoffsForConversation(id, 50);
+  const handoffPeers = memberAgents
+    .filter((a) => a.owner_user_id !== user.id)
+    .map((a) => ({
+      agent_id: a.id,
+      agent_label: `${a.avatar_emoji} ${a.display_name}`,
+      user_label: a.id.split(".").slice(0, 2).join("."),
+    }));
+  const handoffWorkspaceOptions = workspaces.map((w) => ({
+    id: w.id,
+    name: w.name,
+  }));
+
+  // "Chat with my agent" left dock — only shown when the user has both an
+  // external and a managed agent, AND we aren't already viewing the dock's
+  // own 1:1 conversation (otherwise the dock would render itself nested
+  // inside itself).
+  const ownAgent = getOwnAgentChannel(user.id);
+  const showDock = ownAgent && ownAgent.conversation_id !== id;
+
   return (
-    <ConversationView
+    <div className="flex gap-2.5 h-full">
+      {/* The conversation list lives in the app shell on chat routes. This is
+          the chat stage the floating own-agent window measures against. */}
+      <div id="a2a-chat-stage" className="flex-1 min-w-0 h-full">
+        <ConversationView
       conv={conv}
       members={memberAgents}
       messages={messages}
@@ -557,12 +762,45 @@ export default async function ConversationPage({
       inviteCandidates={inviteCandidates}
       myAgentsForSelfAdd={myAgentsForSelfAdd}
       agentLinks={agentLinks}
+      workspaces={workspaces}
+      workspaceFiles={workspaceFiles}
+      tasks={tasks.slice(0, 5)}
       workspaceCount={workspaces.length}
       primaryWorkspaceId={workspaces[0]?.id ?? null}
       openTaskCount={openTaskCount}
       forwardTargets={forwardTargets}
       myManagedAgentsInRoom={myManagedAgentsInRoom}
       personaOverrides={personaOverrides}
+      handoffs={handoffs.map((h) => ({
+        id: h.id,
+        conversation_id: h.conversation_id,
+        workspace_id: h.workspace_id,
+        from_agent_id: h.from_agent_id,
+        from_user_id: h.from_user_id,
+        to_agent_id: h.to_agent_id,
+        to_user_id: h.to_user_id,
+        title: h.title,
+        brief: h.brief,
+        shared_body: h.shared_body,
+        private_summary: h.private_summary,
+        redaction_count: h.redaction_count,
+        task_id: h.task_id,
+        status: h.status,
+        created_at: h.created_at,
+        responded_at: h.responded_at,
+        response_note: h.response_note,
+        scopes: (() => {
+          try {
+            const s = JSON.parse(h.scopes_json) as unknown;
+            return Array.isArray(s) ? s.map(String) : [];
+          } catch {
+            return [];
+          }
+        })(),
+        duration_key: h.duration_key,
+      }))}
+      handoffPeers={handoffPeers}
+      handoffWorkspaces={handoffWorkspaceOptions}
       actions={{
         send: sendMessageAction,
         edit: editMessageAction,
@@ -581,8 +819,28 @@ export default async function ConversationPage({
         leave: leaveGroupAction,
         forward: forwardAction,
         setPersonaOverride: setPersonaOverrideAction,
+        proposeHandoff: proposeHandoffAction,
+        respondHandoff: respondHandoffAction,
+        withdrawHandoff: withdrawHandoffAction,
+        completeHandoff: completeHandoffAction,
       }}
       error={error}
-    />
+        />
+      </div>
+
+      {/* Floating private 1:1 with the user's own managed agent — drag,
+          resize, minimise, maximise, or close to a launcher pill; geometry
+          persists across reloads. */}
+      {showDock && ownAgent ? (
+        <OwnAgentDock
+          floating
+          convId={ownAgent.conversation_id}
+          myExternalAgentId={ownAgent.external_agent.id}
+          managedAgent={ownAgent.managed_agent}
+          messages={ownAgent.recent_messages}
+          sendAction={ownAgentSendAction}
+        />
+      ) : null}
+    </div>
   );
 }

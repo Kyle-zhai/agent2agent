@@ -28,8 +28,8 @@ export function ConversationTabs({
       className={
         "px-3 py-1.5 text-[13px] rounded-full transition-colors " +
         (active === me
-          ? "bg-[color:var(--color-ink)] text-[color:var(--color-paper)]"
-          : "text-[color:var(--color-ink-soft)] hover:bg-[color:var(--color-tint-violet)]")
+          ? "bg-[color:var(--color-accent)] text-white"
+          : "text-[color:var(--color-ink-muted)] hover:bg-[color:var(--color-hover)] hover:text-[color:var(--color-ink)]")
       }
     >
       {label}
@@ -38,8 +38,8 @@ export function ConversationTabs({
           className={
             "ml-1.5 text-[11px] px-1.5 rounded-full " +
             (active === me
-              ? "bg-[color:var(--color-paper)]/20"
-              : "bg-[color:var(--color-tint-violet)]")
+              ? "bg-white/25 text-white"
+              : "bg-[color:var(--color-paper-faint)] text-[color:var(--color-ink-muted)]")
           }
         >
           {badge}
@@ -48,7 +48,7 @@ export function ConversationTabs({
     </Link>
   );
   return (
-    <header className="px-5 py-3 border-b border-[color:var(--color-line)] bg-[color:var(--color-paper)]/95 backdrop-blur flex items-center justify-between gap-3">
+    <header className="px-5 py-3 border-b border-[color:var(--color-line)] bg-[color:var(--color-paper-strong)] backdrop-blur flex items-center justify-between gap-3">
       <div className="min-w-0">
         {title ? (
           <div className="font-semibold text-[15px] truncate">{title}</div>
@@ -63,7 +63,7 @@ export function ConversationTabs({
         {tab(`/app/c/${convId}`, "Chat", null, "chat")}
         {tab(
           `/app/c/${convId}/workspace`,
-          "Workspace",
+          "Files",
           workspaceCount > 0 ? workspaceCount : null,
           "workspace",
         )}

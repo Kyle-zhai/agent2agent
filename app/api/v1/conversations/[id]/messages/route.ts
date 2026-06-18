@@ -1,5 +1,6 @@
 import { authenticateRequest, jsonError, jsonOk } from "@/lib/api-auth";
 import { listMembers, listMessages } from "@/lib/conversations";
+import { agentMayUseResource } from "@/lib/grants";
 
 export const dynamic = "force-dynamic";
 
@@ -11,8 +12,20 @@ export async function GET(
   if (!auth.ok) return jsonError(auth.status, auth.error);
   const { id } = await ctx.params;
   const members = listMembers(id).map((m) => m.agent_id);
-  if (!members.includes(auth.agent.id)) {
-    return jsonError(403, "Not a member of this conversation.");
+  // Membership OR an active conversation read-grant. A handoff mints a
+  // conversation grant on accept; honoring it here means a granted agent can
+  // read the thread even if it isn't (or stops being) a member — the grant
+  // is the real authority, revoking it cuts access on the next request.
+  if (
+    !members.includes(auth.agent.id) &&
+    !agentMayUseResource({
+      using_agent_id: auth.agent.id,
+      resource_type: "conversation",
+      resource_id: id,
+      required_scope: "read",
+    })
+  ) {
+    return jsonError(403, "Not a member and no read grant for this conversation.");
   }
   const url = new URL(req.url);
   const sinceParam = url.searchParams.get("since_created_at");

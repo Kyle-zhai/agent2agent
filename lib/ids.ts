@@ -27,6 +27,13 @@ export const newOAuthIdentityId = () => `oid_${slug()}`;
 export const newInviteId = () => `inv_${slug()}${tail()}`;
 export const newRpcCallId = () => `rpc_${slug()}${tail()}`;
 export const newAgentLinkId = () => `lnk_${slug()}${tail()}`;
+export const newHandoffId = () => `hnd_${slug()}${tail()}`;
+export const newGrantId = () => `grt_${slug()}${tail()}`;
+
+/** Generic id with a caller-chosen prefix (e.g. newId("pnc") → "pnc_…").
+ *  Use the dedicated helpers above where one exists; this is for one-off
+ *  row kinds that don't warrant their own export. */
+export const newId = (prefix: string) => `${prefix}_${slug()}${tail()}`;
 
 const reservedAgentNames = new Set([
   "admin", "system", "root", "you", "me", "agent",

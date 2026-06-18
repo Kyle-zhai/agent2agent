@@ -25,7 +25,11 @@ async function createWorkspaceAction(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   const { myAgentId } = requireUserMember(convId, user.id);
   if (!name) {
-    redirect(`/app/c/${convId}/workspace?error=name+required`);
+    redirect(
+      `/app/c/${convId}/workspace?error=${encodeURIComponent(
+        "Please add a name.",
+      )}`,
+    );
   }
   try {
     const ws = createWorkspace({
@@ -43,7 +47,7 @@ async function createWorkspaceAction(formData: FormData) {
   } catch (err) {
     redirect(
       `/app/c/${convId}/workspace?error=${encodeURIComponent(
-        err instanceof Error ? err.message : "Create failed.",
+        err instanceof Error ? err.message : "Couldn't create the workspace.",
       )}`,
     );
   }
@@ -80,16 +84,16 @@ export default async function ConversationWorkspaceListPage({
         workspaceCount={list.length}
         openTaskCount={openTasks.length}
         title={conv.type === "group" ? conv.title ?? "Untitled group" : "Direct"}
-        subtitle="Shared, versioned workspaces"
+        subtitle="Shared files — every change is saved as a version"
       />
-      <main className="max-w-3xl mx-auto p-6 space-y-6">
+      <main className="app-stage-wide space-y-6">
         {error ? (
           <div className="callout callout-amber text-[13px]">
             ⚠ {decodeURIComponent(error)}
           </div>
         ) : null}
 
-        <section className="surface p-5">
+        <section className="module-panel p-5">
           <h2 className="font-semibold text-[15px] mb-3">
             New workspace
           </h2>
@@ -107,8 +111,8 @@ export default async function ConversationWorkspaceListPage({
             </button>
           </form>
           <p className="text-[12px] text-[color:var(--color-ink-soft)] mt-2">
-            All current conversation members get <b>writer</b> access automatically.
-            You become <b>admin</b>.
+            Everyone in this conversation gets <b>edit</b> access automatically.
+            You get <b>manage</b> access.
           </p>
         </section>
 
@@ -118,8 +122,9 @@ export default async function ConversationWorkspaceListPage({
           </h2>
           {list.length === 0 ? (
             <p className="text-[13px] text-[color:var(--color-ink-soft)]">
-              No workspaces yet. Create one above — files are versioned by content hash;
-              every agent in this room can read/write through the v1 REST API.
+              No workspaces yet. Create one above — every change is saved as a
+              version, and the assistants in this conversation can read and
+              edit the files.
             </p>
           ) : (
             <ul className="space-y-2">
@@ -127,12 +132,12 @@ export default async function ConversationWorkspaceListPage({
                 <li key={ws.id}>
                   <Link
                     href={`/app/c/${convId}/workspace/${ws.id}`}
-                    className="surface surface-hover p-4 flex items-center justify-between gap-3"
+                    className="data-row surface-hover justify-between"
                   >
                     <div className="min-w-0">
                       <div className="font-medium truncate">{ws.name}</div>
                       <div className="text-[12px] text-[color:var(--color-ink-soft)] truncate">
-                        head:{" "}
+                        latest version:{" "}
                         <code className="font-mono">
                           {ws.head_snapshot_id?.slice(0, 14) ?? "—"}
                         </code>

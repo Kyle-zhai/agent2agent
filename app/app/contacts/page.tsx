@@ -66,7 +66,7 @@ async function startWorkspaceAction(formData: FormData) {
   const otherAgentId = String(formData.get("other_agent_id") ?? "").trim();
   const myAgents = listAgentsForUser(user.id);
   if (myAgents.length === 0) {
-    redirect("/app/agents/new?error=create+an+agent+first");
+    redirect("/app/agents/new?error=Create+an+assistant+first");
   }
   // Pick the user's first agent that's friended with the other. The actual
   // pick rule is "first listed agent that is in a friendship row with the
@@ -76,7 +76,7 @@ async function startWorkspaceAction(formData: FormData) {
   if (!mine) {
     redirect(
       `/app/contacts?error=${encodeURIComponent(
-        "None of your agents are friends with " + otherAgentId,
+        "None of your assistants are friends with " + otherAgentId,
       )}`,
     );
   }
@@ -192,18 +192,22 @@ export default async function ContactsPage({
   const searchResults = q
     ? searchAgentsByPrefix(q).filter((a) => !myAgentIds.has(a.id))
     : [];
-
   return (
-    <div className="max-w-4xl mx-auto px-10 py-12">
-      <header className="mb-8">
-        <div className="text-xs uppercase tracking-wider text-[color:var(--color-ink-soft)] mb-1">
-          People & Agents
+    <div className="app-stage">
+      <header className="page-header-row">
+        <div>
+          <div className="page-kicker">People & Assistants</div>
+          <h1 className="page-title">Contacts</h1>
+          <p className="page-subtitle">
+            Search by assistant ID. Friendships are between assistants, not
+            accounts — so you control who each of your assistants can talk to.
+          </p>
         </div>
-        <h1 className="text-3xl font-semibold tracking-tight">Contacts</h1>
-        <p className="mt-2 text-sm text-[color:var(--color-ink-muted)]">
-          Search by agent ID. Friendships are between agents, not users — so
-          you control who each of your agents can talk to.
-        </p>
+        <div className="metric-grid min-w-[360px] max-w-[520px] flex-1 text-center">
+          <MiniStat label="Friends" value={friends.length} />
+          <MiniStat label="Invites" value={invites.length} />
+          <MiniStat label="Requests" value={incoming.length + outgoing.length} />
+        </div>
       </header>
 
       {ok ? (
@@ -219,123 +223,146 @@ export default async function ContactsPage({
         </div>
       ) : null}
 
-      {myAgents.length > 0 ? (
-        <section className="surface p-5 mb-8">
-          <h2 className="font-medium mb-1">Invite a human friend</h2>
-          <p className="text-xs text-[color:var(--color-ink-soft)] mb-3">
-            Generate a one-use link. Share it via WeChat/iMessage/whatever — the
-            recipient signs up (any provider works) and your agents become
-            friends automatically.
-          </p>
-          <form action={createInviteAction} className="space-y-2">
-            <div className="flex gap-2">
-              <select
-                name="inviter_agent_id"
-                className="input flex-1"
-                defaultValue={myAgents[0]?.id}
-              >
-                {myAgents.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    From {a.avatar_emoji} {a.display_name}
-                  </option>
-                ))}
-              </select>
-              <button type="submit" className="btn btn-primary btn-sm">
-                Generate link
-              </button>
+      <section className="command-panel">
+        <div className="grid lg:grid-cols-2">
+          <div className="command-cell">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="page-kicker">Quick invite</div>
+                <h2 className="command-title">Create a single-use link</h2>
+                <p className="command-copy">
+                  Share a short invite from one of your assistants. The recipient
+                  accepts once, then their assistants can join your network.
+                </p>
+              </div>
+              <span className="tag tag-violet">1 use</span>
             </div>
-            <input
-              name="note"
-              maxLength={280}
-              placeholder="Optional note shown on the invite page (“Hey it's me, Bob”)"
-              className="input text-[13px]"
-            />
-          </form>
 
-          {invites.length > 0 ? (
-            <ul className="mt-4 space-y-2 text-[13px]">
-              {invites.map((inv) => {
-                const url = `${baseUrl}/invite/${inv.code}`;
-                const used = inv.used_count >= inv.max_uses;
-                const expired = inv.expires_at && inv.expires_at < Date.now();
-                return (
-                  <li
-                    key={inv.id}
-                    className="flex items-center justify-between gap-2 border-b border-[color:var(--color-line)] pb-2 last:border-0"
+            {myAgents.length > 0 ? (
+              <form action={createInviteAction} className="mt-4 space-y-2">
+                <div className="office-control-row">
+                  <select
+                    name="inviter_agent_id"
+                    className="input flex-1"
+                    defaultValue={myAgents[0]?.id}
+                    aria-label="Inviting assistant"
                   >
-                    <div className="min-w-0">
-                      <code className="font-mono text-[11px] block truncate">
-                        {url}
-                      </code>
-                      <div className="text-[11px] text-[color:var(--color-ink-soft)]">
-                        {inv.used_count}/{inv.max_uses} used
-                        {inv.expires_at
-                          ? ` · expires ${new Date(inv.expires_at).toLocaleDateString()}`
-                          : ""}
-                        {used ? " · 🟢 redeemed" : ""}
-                        {expired ? " · ⌛ expired" : ""}
-                      </div>
-                      {inv.note ? (
-                        <div className="text-[11px] italic text-[color:var(--color-ink-soft)] truncate">
-                          “{inv.note}”
-                        </div>
-                      ) : null}
-                    </div>
-                    <form action={revokeInviteAction}>
-                      <input type="hidden" name="invite_id" value={inv.id} />
-                      <button type="submit" className="btn btn-ghost btn-sm">
-                        Revoke
-                      </button>
-                    </form>
-                  </li>
-                );
-              })}
-            </ul>
-          ) : null}
-        </section>
-      ) : null}
-
-      <section className="surface p-5 mb-8">
-        <h2 className="font-medium mb-3">Find an agent</h2>
-        <form action="/app/contacts" method="get" className="flex gap-2">
-          <input
-            className="input flex-1"
-            name="q"
-            defaultValue={q ?? ""}
-            placeholder="Search by agent ID or name (e.g. bob.review)"
-          />
-          <button type="submit" className="btn btn-primary">
-            Search
-          </button>
-        </form>
-
-        {q ? (
-          <div className="mt-4 space-y-2">
-            {searchResults.length === 0 ? (
-              <p className="text-sm text-[color:var(--color-ink-muted)]">
-                No agents match <code className="kbd">{q}</code>. Ask the owner
-                for the exact ID — they're case-sensitive.
-              </p>
-            ) : (
-              searchResults.map((a) => (
-                <SearchResultRow
-                  key={a.id}
-                  agent={a}
-                  myAgents={myAgents}
-                  alreadyFriend={friendIds.has(a.id)}
+                    {myAgents.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        From {a.avatar_emoji} {a.display_name}
+                      </option>
+                    ))}
+                  </select>
+                  <button type="submit" className="btn btn-primary">
+                    Generate link
+                  </button>
+                </div>
+                <input
+                  name="note"
+                  maxLength={280}
+                  placeholder="Add a note for the invite page"
+                  className="input text-[13px]"
                 />
-              ))
+              </form>
+            ) : (
+              <Link href="/app/agents/new" className="btn btn-primary mt-4">
+                Create an assistant first
+              </Link>
             )}
+
+            {invites.length > 0 ? (
+              <div className="mt-4 border-t border-[color:var(--color-line)] pt-3">
+                <div className="text-[11px] uppercase tracking-[0.12em] font-semibold text-[color:var(--color-ink-soft)]">
+                  Active links
+                </div>
+                <ul className="mt-2 space-y-2 text-[13px]">
+                  {invites.map((inv) => {
+                    const url = `${baseUrl}/invite/${inv.code}`;
+                    const used = inv.used_count >= inv.max_uses;
+                    const expired = inv.expires_at && inv.expires_at < Date.now();
+                    return (
+                      <li key={inv.id} className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <code className="font-mono text-[11px] block truncate">
+                            {url}
+                          </code>
+                          <div className="text-[11px] text-[color:var(--color-ink-soft)]">
+                            {inv.used_count}/{inv.max_uses} used
+                            {inv.expires_at
+                              ? ` · expires ${new Date(inv.expires_at).toLocaleDateString()}`
+                              : ""}
+                            {used ? " · redeemed" : ""}
+                            {expired ? " · expired" : ""}
+                          </div>
+                        </div>
+                        <form action={revokeInviteAction}>
+                          <input type="hidden" name="invite_id" value={inv.id} />
+                          <button type="submit" className="btn btn-ghost btn-sm">
+                            Revoke
+                          </button>
+                        </form>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ) : null}
           </div>
-        ) : null}
+
+          <div className="command-cell">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="page-kicker">Directory lookup</div>
+                <h2 className="command-title">Find an assistant</h2>
+                <p className="command-copy">
+                  Search by exact assistant ID or name, then send the request
+                  from the assistant you want to introduce.
+                </p>
+              </div>
+              <span className="tag">ID search</span>
+            </div>
+
+            <form action="/app/contacts" method="get" className="office-control-row">
+              <input
+                className="input flex-1"
+                name="q"
+                defaultValue={q ?? ""}
+                placeholder="Try bob.review or an exact assistant ID"
+              />
+              <button type="submit" className="btn btn-primary">
+                Search
+              </button>
+            </form>
+
+            {q ? (
+              <div className="mt-4 space-y-2">
+                {searchResults.length === 0 ? (
+                  <p className="text-sm text-[color:var(--color-ink-muted)]">
+                    No assistants match <code className="kbd">{q}</code>. Ask the
+                    owner for the exact ID; assistant IDs are case-sensitive.
+                  </p>
+                ) : (
+                  searchResults.map((a) => (
+                    <SearchResultRow
+                      key={a.id}
+                      agent={a}
+                      myAgents={myAgents}
+                      alreadyFriend={friendIds.has(a.id)}
+                    />
+                  ))
+                )}
+              </div>
+            ) : null}
+          </div>
+        </div>
       </section>
 
       {incoming.length > 0 ? (
-        <section className="mb-8">
-          <h2 className="font-medium mb-3">Incoming requests</h2>
+        <section className="mt-6">
+          <h2 className="text-[15px] font-semibold mb-3">Incoming requests</h2>
           <ul className="space-y-2">
             {incoming.map((r) => (
-              <li key={r.id} className="surface p-4 flex items-center justify-between">
+              <li key={r.id} className="directory-panel p-4 flex items-center justify-between">
                 <div>
                   <code className="kbd">{r.from_agent_id}</code>
                   <span className="text-sm text-[color:var(--color-ink-muted)]">
@@ -364,11 +391,11 @@ export default async function ContactsPage({
       ) : null}
 
       {outgoing.length > 0 ? (
-        <section className="mb-8">
-          <h2 className="font-medium mb-3">Pending sent</h2>
+        <section className="mt-6">
+          <h2 className="text-[15px] font-semibold mb-3">Sent requests</h2>
           <ul className="space-y-2">
             {outgoing.map((r) => (
-              <li key={r.id} className="surface p-4 flex items-center justify-between">
+              <li key={r.id} className="directory-panel p-4 flex items-center justify-between">
                 <div>
                   <code className="kbd">{r.from_agent_id}</code>
                   <span className="text-sm text-[color:var(--color-ink-muted)]">
@@ -376,40 +403,52 @@ export default async function ContactsPage({
                   </span>
                   <code className="kbd">{r.to_agent_id}</code>
                 </div>
-                <span className="tag tag-amber">awaiting</span>
+                <span className="tag tag-amber">waiting for reply</span>
               </li>
             ))}
           </ul>
         </section>
       ) : null}
 
-      <section>
-        <h2 className="font-medium mb-3">
-          Friends ({friends.length})
-        </h2>
+      <section className="mt-7">
+        <div className="flex items-end justify-between gap-4 mb-3">
+          <div>
+            <div className="page-kicker">Directory</div>
+            <h2 className="text-[18px] font-semibold tracking-tight">
+              Friends ({friends.length})
+            </h2>
+          </div>
+          <span className="text-[12px] text-[color:var(--color-ink-soft)]">
+            People and assistants your agents can safely work with.
+          </span>
+        </div>
         {friends.length === 0 ? (
           <p className="text-sm text-[color:var(--color-ink-muted)]">
-            No agent friends yet. Search above and send a request.
+            No friends yet. Search above and send a request.
           </p>
         ) : (
-          <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <ul className="directory-panel">
             {friends.map((f) => (
-              <li key={f.id} className="surface p-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-2xl">{f.avatar_emoji}</span>
+              <li key={f.id} className="directory-row">
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className="person-orb">
+                    {f.avatar_emoji}
+                  </span>
                   <div className="flex-1 min-w-0">
-                    <div className="font-medium truncate">{f.display_name}</div>
+                    <div className="font-semibold truncate">{f.display_name}</div>
                     <code className="text-xs font-mono text-[color:var(--color-ink-muted)] truncate block">
                       {f.id}
                     </code>
                   </div>
                 </div>
-                {f.description ? (
-                  <p className="mt-2 text-xs text-[color:var(--color-ink-muted)] line-clamp-2">
-                    {f.description}
-                  </p>
-                ) : null}
-                <div className="mt-3 flex gap-1.5 flex-wrap">
+                <div className="min-w-0 text-[12px] leading-relaxed text-[color:var(--color-ink-muted)]">
+                  {f.description ? (
+                    <span className="line-clamp-2">{f.description}</span>
+                  ) : (
+                    <span className="tag">Ready for chat and shared workspaces</span>
+                  )}
+                </div>
+                <div className="flex gap-1.5 flex-wrap justify-end">
                   <Link
                     href={`/app/conversations/new?with=${encodeURIComponent(f.id)}`}
                     className="btn btn-secondary btn-sm"
@@ -427,7 +466,7 @@ export default async function ContactsPage({
                     <input type="hidden" name="other_agent_id" value={f.id} />
                     <button
                       type="submit"
-                      className="btn btn-primary btn-sm"
+                      className="btn btn-secondary btn-sm"
                       title="Direct chat + a shared workspace, in one click"
                     >
                       + Workspace
@@ -443,6 +482,17 @@ export default async function ContactsPage({
   );
 }
 
+function MiniStat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="metric-tile min-w-[96px]">
+      <div className="metric-label">
+        {label}
+      </div>
+      <div className="metric-value !text-[20px]">{value}</div>
+    </div>
+  );
+}
+
 function SearchResultRow({
   agent,
   myAgents,
@@ -454,9 +504,9 @@ function SearchResultRow({
 }) {
   if (!agent) return null;
   return (
-    <div className="surface p-4 flex items-center justify-between gap-3 flex-wrap">
+    <div className="directory-row !grid-cols-[minmax(220px,1fr)_auto] rounded-2xl border border-[color:var(--color-line)] bg-white/55">
       <div className="flex items-center gap-3 min-w-0 flex-1">
-        <span className="text-2xl">{agent.avatar_emoji}</span>
+        <span className="person-orb">{agent.avatar_emoji}</span>
         <div className="min-w-0">
           <div className="font-medium truncate">{agent.display_name}</div>
           <code className="text-xs font-mono text-[color:var(--color-ink-muted)] truncate block">

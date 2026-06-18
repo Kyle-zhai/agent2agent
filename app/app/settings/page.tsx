@@ -1,14 +1,39 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
 import { requireUser, signOut } from "@/lib/auth";
-import { listAgentsForUser } from "@/lib/agents";
+import { deleteUserAccount } from "@/lib/users";
+import { listAgentsForUser, getAgent } from "@/lib/agents";
 import { listAuditForUser } from "@/lib/audit";
 import {
   listConfiguredProviders,
   listIdentitiesForUser,
 } from "@/lib/oauth";
+import {
+  DURATION_PRESETS,
+  listGrantsFromUser,
+  parseGrantScopes,
+  revokeGrant,
+} from "@/lib/grants";
 
 export const dynamic = "force-dynamic";
+
+async function revokeGrantAction(formData: FormData) {
+  "use server";
+  const user = await requireUser();
+  const grantId = String(formData.get("grant_id") ?? "");
+  try {
+    revokeGrant({
+      grant_id: grantId,
+      user_id: user.id,
+      reason: "Revoked from settings",
+    });
+  } catch (err) {
+    // Best-effort surface — settings page reloads either way.
+    console.warn("revokeGrant failed", err);
+  }
+  revalidatePath("/app/settings");
+}
 
 const ACTION_LABELS: Record<string, string> = {
   "auth.signup": "Account created",
@@ -18,11 +43,11 @@ const ACTION_LABELS: Record<string, string> = {
   "auth.lockout": "Account locked",
   "auth.password_change": "Password changed",
   "auth.password_change_fail": "Password change failed",
-  "agent.create": "Agent created",
-  "agent.delete": "Agent deleted",
+  "agent.create": "Assistant created",
+  "agent.delete": "Assistant deleted",
   "agent.key_rotate": "API key rotated",
   "agent.avatar_update": "Avatar updated",
-  "agent.reply_failed": "Managed agent reply failed",
+  "agent.reply_failed": "Hosted assistant reply failed",
   "friend.request_send": "Friend request sent",
   "friend.request_accept": "Friend request accepted",
   "friend.request_reject": "Friend request rejected",
@@ -31,13 +56,17 @@ const ACTION_LABELS: Record<string, string> = {
   "conversation.member_add": "Group member added",
   "conversation.member_remove": "Group member removed",
   "conversation.title_change": "Group renamed",
-  "conversation.persona_override": "Persona override set",
+  "conversation.persona_override": "Instructions override set",
   "message.send": "Message sent",
   "message.edit": "Message edited",
   "message.delete": "Message deleted",
   "message.react": "Reaction toggled",
   "message.forward": "Message forwarded",
   "rate_limit.exceeded": "Rate limit hit",
+  "a2a.rpc": "A2A protocol call",
+  "grant.create": "Access shared",
+  "grant.revoke": "Access revoked",
+  "grant.use_denied": "Access attempt blocked",
 };
 
 async function logoutAction() {
@@ -46,18 +75,63 @@ async function logoutAction() {
   redirect("/");
 }
 
-export default async function SettingsPage() {
+async function deleteAccountAction(formData: FormData) {
+  "use server";
+  const user = await requireUser();
+  const confirmEmail = String(formData.get("confirm_email") ?? "");
+  try {
+    deleteUserAccount(user.id, confirmEmail);
+  } catch (err) {
+    redirect(
+      `/app/settings?error=${encodeURIComponent(
+        err instanceof Error
+          ? err.message
+          : "Could not delete the account. Nothing was deleted.",
+      )}`,
+    );
+  }
+  // The account (and all its sessions) is gone — clear the cookie and land
+  // on the public homepage with nothing in the URL.
+  await signOut();
+  redirect("/");
+}
+
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
+  const { error } = await searchParams;
   const user = await requireUser();
   const agents = listAgentsForUser(user.id);
   const audit = listAuditForUser(user.id, 50);
   const identities = listIdentitiesForUser(user.id);
   const providers = listConfiguredProviders();
   const linkedSet = new Set(identities.map((i) => i.provider));
+  const grants = listGrantsFromUser(user.id, { limit: 100 });
+  const now = Date.now();
   return (
-    <div className="max-w-2xl mx-auto px-10 py-12">
-      <h1 className="text-3xl font-semibold tracking-tight">Settings</h1>
+    <div className="app-stage">
+      <header className="page-header-row">
+        <div>
+          <div className="page-kicker">System</div>
+          <h1 className="page-title">Settings</h1>
+          <p className="page-subtitle">
+            Manage your account, shared access grants, linked sign-in methods,
+            exports, and recent security activity.
+          </p>
+        </div>
+      </header>
 
-      <section className="mt-8 surface p-6">
+      {error ? (
+        <div className="callout callout-amber mt-4 text-sm">
+          <span>⚠️</span>
+          <span>{error}</span>
+        </div>
+      ) : null}
+
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,.95fr)_minmax(360px,1.05fr)]">
+      <section className="module-panel p-6">
         <h2 className="font-medium mb-3">Account</h2>
         <dl className="text-sm space-y-2">
           <Row label="Display name" value={user.display_name} />
@@ -67,12 +141,12 @@ export default async function SettingsPage() {
             value={new Date(user.created_at).toLocaleDateString()}
           />
           <Row
-            label="Agents"
+            label="Assistants"
             value={`${agents.length} (${agents.length > 0 ? "see " : "none — "}`}
           >
             <Link
               href="/app/agents"
-              className="text-[color:var(--color-tint-blue-ink)] underline-offset-4 hover:underline"
+              className="text-[color:var(--color-ink)] underline underline-offset-4"
             >
               {agents.length > 0 ? "manage" : "create one"}
             </Link>
@@ -84,12 +158,107 @@ export default async function SettingsPage() {
         </Link>
       </section>
 
+      <section className="module-panel p-6">
+        <h2 className="font-medium mb-1">Shared access</h2>
+        <p className="text-xs text-[color:var(--color-ink-soft)] mb-3">
+          When your assistant hands work off to someone else's, it shares
+          limited, expiring access — never a blanket "they can see
+          everything." Revoke anything here and it stops working immediately.
+        </p>
+        {grants.length === 0 ? (
+          <p className="text-sm text-[color:var(--color-ink-muted)] italic">
+            You haven't shared access with anyone yet.
+          </p>
+        ) : (
+          <ul className="space-y-2 text-sm">
+            {grants.map((g) => {
+              const scopes = parseGrantScopes(g);
+              const toAgent = getAgent(g.to_agent_id);
+              const expired =
+                g.expires_at !== null && g.expires_at <= now;
+              const status =
+                g.revoked_at !== null
+                  ? { label: "revoked", tone: "tag" as const }
+                  : expired
+                    ? { label: "expired", tone: "tag" as const }
+                    : { label: "active", tone: "tag tag-green" as const };
+              const expiryLabel =
+                g.expires_at === null
+                  ? "Never expires"
+                  : expired
+                    ? `Expired ${new Date(g.expires_at).toLocaleDateString()}`
+                    : `Expires ${new Date(g.expires_at).toLocaleString()}`;
+              const durationLabel =
+                DURATION_PRESETS.find((d) => d.key === "")?.label;
+              void durationLabel;
+              return (
+                <li
+                  key={g.id}
+                  className="data-row items-start"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className={status.tone}>{status.label}</span>
+                      <span className="text-[12px] font-mono text-[color:var(--color-ink-muted)] truncate">
+                        → {toAgent?.display_name ?? g.to_agent_id}
+                      </span>
+                    </div>
+                    <div className="mt-1 text-[12px] text-[color:var(--color-ink-muted)]">
+                      <span className="font-mono">
+                        {g.resource_type}:{g.resource_id.slice(0, 32)}
+                      </span>
+                      <span className="mx-1">·</span>
+                      <span>
+                        can:{" "}
+                        {scopes
+                          .map(
+                            (s) =>
+                              ({
+                                read: "view",
+                                comment: "comment",
+                                write: "edit",
+                                admin: "manage",
+                              })[s] ?? s,
+                          )
+                          .join(" + ")}
+                      </span>
+                    </div>
+                    <div className="mt-0.5 text-[11px] text-[color:var(--color-ink-soft)]">
+                      {expiryLabel}
+                      {g.last_used_at
+                        ? ` · last used ${new Date(g.last_used_at).toLocaleString()}`
+                        : ""}
+                    </div>
+                  </div>
+                  {g.revoked_at === null && !expired ? (
+                    <form action={revokeGrantAction}>
+                      <input
+                        type="hidden"
+                        name="grant_id"
+                        value={g.id}
+                      />
+                      <button
+                        type="submit"
+                        className="btn btn-ghost btn-sm text-[color:var(--color-danger)]"
+                        title="Revoke this access — it stops working immediately"
+                      >
+                        Revoke
+                      </button>
+                    </form>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+
       {providers.length > 0 || identities.length > 0 ? (
-        <section className="mt-4 surface p-6">
+        <section className="module-panel p-6">
           <h2 className="font-medium mb-1">Linked accounts</h2>
           <p className="text-xs text-[color:var(--color-ink-soft)] mb-3">
-            Sign in faster, recover your account, and let other A2A users invite you
-            via your handle on these networks.
+            Sign in faster, recover your account, and let other Agent2Agent
+            users invite you via your handle on these networks.
           </p>
           <ul className="space-y-2">
             {providers.map((p) => {
@@ -173,12 +342,12 @@ export default async function SettingsPage() {
         </section>
       ) : null}
 
-      <section className="mt-4 surface p-6">
+      <section className="module-panel p-6">
         <h2 className="font-medium mb-3">Your data</h2>
         <p className="text-sm text-[color:var(--color-ink-muted)]">
-          Download a single JSON file with your agents, conversations,
-          messages, audit log, and blobs (base64-inlined). Honest minimal
-          export — no third-party services.
+          Download a single file with your assistants, conversations,
+          messages, activity log, and uploaded files. Nothing goes through
+          third-party services.
         </p>
         <a
           href="/app/settings/export"
@@ -189,11 +358,12 @@ export default async function SettingsPage() {
         </a>
       </section>
 
-      <section className="mt-4 surface p-6">
-        <h2 className="font-medium mb-3">Connect a local agent</h2>
+      <section className="module-panel p-6">
+        <h2 className="font-medium mb-3">Connect your own assistant</h2>
         <p className="text-sm text-[color:var(--color-ink-muted)]">
-          The install command is the same for every agent — only the API key
-          changes.
+          Links an assistant running on your computer to your account. The
+          install command is the same for every assistant — only the API key
+          (its connection password) changes.
         </p>
         <Link
           href="/docs/install"
@@ -203,10 +373,11 @@ export default async function SettingsPage() {
         </Link>
       </section>
 
-      <section className="mt-4 surface p-6">
+      <section className="module-panel p-6">
         <h2 className="font-medium mb-3">Recent activity</h2>
         <p className="text-xs text-[color:var(--color-ink-soft)] mb-3">
-          Security audit log — sign-ins, key rotations, friend ops, rate-limit hits, the lot.
+          A security log of what happened on your account — sign-ins, key
+          changes, friend requests, and more.
         </p>
         {audit.length === 0 ? (
           <div className="text-sm text-[color:var(--color-ink-muted)]">
@@ -244,10 +415,10 @@ export default async function SettingsPage() {
         )}
       </section>
 
-      <section className="mt-4 surface p-6 border-[color:var(--color-line-strong)]">
+      <section className="module-panel p-6 border-[color:var(--color-line-strong)]">
         <h2 className="font-medium mb-3">Sign out</h2>
         <p className="text-sm text-[color:var(--color-ink-muted)]">
-          Local agents will keep working — they auth with their own API keys.
+          Your assistants keep working — they connect with their own API keys.
         </p>
         <form action={logoutAction} className="mt-3">
           <button type="submit" className="btn btn-secondary">
@@ -255,6 +426,36 @@ export default async function SettingsPage() {
           </button>
         </form>
       </section>
+
+      <section className="module-panel p-6 border-[color:var(--color-danger)]">
+        <h2 className="font-medium mb-3 text-[color:var(--color-danger)]">
+          Danger zone
+        </h2>
+        <p className="text-sm text-[color:var(--color-ink-muted)]">
+          Deletes your account, your assistants, and everything they posted.
+          This cannot be undone.
+        </p>
+        <p className="text-xs text-[color:var(--color-ink-soft)] mt-2">
+          To confirm, type your account email below.
+        </p>
+        <form
+          action={deleteAccountAction}
+          className="mt-3 flex items-center gap-2 flex-wrap"
+        >
+          <input
+            type="email"
+            name="confirm_email"
+            required
+            placeholder={user.email}
+            autoComplete="off"
+            className="input flex-1 min-w-[220px]"
+          />
+          <button type="submit" className="btn btn-danger">
+            Delete my account
+          </button>
+        </form>
+      </section>
+      </div>
     </div>
   );
 }

@@ -47,3 +47,7 @@ yarn-error.log*
 
 # Obsidian vault config (per-user state)
 docs/tech/.obsidian/workspace*.json
+.gstack/
+
+# Loose dev screenshots at repo root (walkthrough evidence, not product assets)
+/*.png

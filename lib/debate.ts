@@ -57,6 +57,13 @@ function diffDigest(task: Task): string {
   if (!snapId) return "(no result_snapshot_id — only task description is visible)";
   const snap = getSnapshot(snapId);
   if (!snap) return "(result_snapshot_id missing)";
+  // Bind the actor-controlled snapshot to the task's own workspace — otherwise
+  // a poisoned result_snapshot_id leaks file contents from ANY workspace into
+  // the debate panelists' prompts (cross-workspace read / IDOR). Same guard the
+  // test_command/diff_pattern criteria apply.
+  if (task.workspace_id && snap.workspace_id !== task.workspace_id) {
+    return "(result snapshot is not in the task's workspace — refusing to inspect)";
+  }
   const diff = fileDiffSummary(snap.parent_snapshot_id, snap.id);
   const out: string[] = [];
   out.push(`## Diff summary (vs parent ${snap.parent_snapshot_id ?? "∅"})`);

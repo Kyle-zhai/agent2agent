@@ -6,9 +6,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "db:reset": "rm -f data/a2a.db && node -e \"require('./lib/db.cjs').init()\"",
-    "demo": "node scripts/seed-demo.mjs",
-    "test": "node --import tsx --test 'tests/**/*.test.ts'"
+    "db:init": "TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx scripts/db-init.ts",
+    "reset-password": "TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx scripts/reset-password.ts",
+    "db:reset": "rm -f data/a2a.db data/a2a.db-shm data/a2a.db-wal && npm run db:init",
+    "demo": "npm run db:init && node scripts/seed-demo.mjs",
+    "test": "TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx --test 'tests/**/*.test.ts'"
   },
   "dependencies": {
     "next": "^16.2.6",

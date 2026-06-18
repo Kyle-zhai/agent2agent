@@ -2,8 +2,8 @@
 title: Tasks — 可分配的工作单元
 type: tech-doc
 status: living
-last_updated: 2026-05-11
-tags: [v0.5, task, 状态机, success_criteria, capability]
+last_updated: 2026-06-11
+tags: [v0.5, v0.23, task, 状态机, success_criteria, capability, chat-command]
 links: [[INDEX]], [[AUTONOMOUS_DESIGN]], [[WORKSPACES]]
 ---
 
@@ -11,6 +11,7 @@ links: [[INDEX]], [[AUTONOMOUS_DESIGN]], [[WORKSPACES]]
 
 > [!summary]
 > Task 是 v0.5 引入的**可分配工作单元**。每个 task 有 owner、可选 assignee、状态机、`required_capabilities`（assignee 必须具备）和 `success_criteria`（关 `done` 时服务端跑校验，失败自动回退）。任务 + workspace + capability 三者一起让"分配 → 执行 → 审 → 关"成为通用协议——任何 agent（不只是 Claude Code）都能参与。
+> v0.23 起，**人类侧的创建入口移进了聊天**：在会话里输入 `/task …`（见下文 [[#v0.23 — 聊天内建任务（/task 命令）|/task 命令]]）；独立的 "New task" 表单已移除，tasks 页只做跟踪与审查。
 
 ## 状态机
 
@@ -99,9 +100,27 @@ UI 在 `/app/c/{conv}/tasks/{tsk}` 展示完整时间线，agent 端读 `GET /ta
 
 `task_artifacts` 把可引用的产出（snapshot、attachment、context note、tool_result）挂在任务上。当 patch 带了 `task_id`，自动写一条 `kind = snapshot` 的 artifact——这是 task 把 workspace 改动绑回来的钩。
 
+## v0.23 — 聊天内建任务（/task 命令）
+
+人类创建任务的入口移进了聊天（`lib/task-command.ts:tryCreateTaskFromChat`，由 `app/app/c/[id]/page.tsx` 的 sendMessageAction 调用）。独立的 "New task" 表单已**整个移除**——tasks 页只剩跟踪与审查（外部 agent 仍走 `POST /api/v1/tasks`，不受影响）。
+
+```
+/task 标题写在第一行 @bob
+后续行成为 description
+```
+
+规则（全部有测试，`tests/lib/task-command.test.ts`）：
+
+- 只有消息**开头**的 `/task`（后跟空白）才是命令；`/taskforce` 是普通词，裸 `/task` 没内容也按普通消息发出——**用户手滑永不抛错**
+- **@ 门控**：只有 @ 到的、且解析为**本会话成员**的 assistant 才会被指派。第一个解析成功的 mention 生效（handle 等于成员 agent id，或是其 `handle.` 前缀，对应 `handle[.purpose].tail` 的 id 格式）。没有任何 mention 解析成功 → 任务**不指派**——等于给人类的备忘，没有 assistant 会动它
+- 标题 = 第一行去掉首尾的**独立** @handle token（句中 @ 保留），折叠空白，≤200 字符；为空时回退 `Task for @handle` / `Untitled task`
+- **原始命令文本不入库**——发进会话的是一条确认消息（"✅ Task created: … assigned to @bob"），确认里的 @ 顺带提醒 assignee
+- 带附件 / ContextNote / reply 的消息**不走**命令解析（原样发送）
+- 聊天命令故意保持简单：**不支持** `required_capabilities` / `success_criteria`——人类侧这些只能通过 API / agent tools 配置（机器判据仍是关 `done` 的硬闸门，见上文 DSL）
+
 ## Web UI
 
-- `/app/c/{conv}/tasks` —— 新建 + 列表（open / closed 两段）
+- `/app/c/{conv}/tasks` —— **跟踪 + 审查**：open / closed 两段列表 + "chat command" 提示卡（指引回聊天输入 `/task …`）。新建表单已移除（v0.23）
 - `/app/c/{conv}/tasks/{tsk}` —— 详情：
   - 上：状态 chip、capabilities 标签、success_criteria 原始 JSON
   - 中：完整 activity timeline

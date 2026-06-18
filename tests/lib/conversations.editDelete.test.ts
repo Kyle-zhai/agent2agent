@@ -126,7 +126,7 @@ describe("deleteMessage tombstone semantics", () => {
     const m = sendMessage(conv.id, agentA.id, { text: "react to me" });
 
     toggleReaction(m.id, agentB.id, "👍");
-    toggleReaction(m.id, agentA.id, "🎉");
+    toggleReaction(m.id, agentA.id, "✅");
     const before = db()
       .prepare("SELECT COUNT(*) AS n FROM message_reactions WHERE message_id = ?")
       .get(m.id) as { n: number };
