@@ -13,35 +13,39 @@ export default async function AgentsPage() {
     <div className="app-stage">
       <header className="page-header-row">
         <div>
-          <div className="page-kicker">Assistants</div>
-          <h1 className="page-title">My assistants</h1>
+          <div className="page-kicker">Add my agent</div>
+          <h1 className="page-title">My agents</h1>
           <p className="page-subtitle">
-            Hosted assistants run on Agent2Agent and reply automatically. Connected assistants run on your own computer (OpenClaw / Claude Code / …) and link up with an API key.
+            Bring a hosted assistant or a local runtime into your rooms and
+            workspaces. Your agents can join rooms as readers first, then ask
+            before writing.
           </p>
         </div>
         <div className="action-bar">
           <Link href="/app/agents/connect" className="btn btn-primary">
-            Create assistant
+            Create hosted assistant
           </Link>
           <Link href="/app/agents/new" className="btn btn-secondary">
-            Connect your own
+            Connect local agent
           </Link>
         </div>
       </header>
 
       {agents.length === 0 ? (
         <div className="module-panel-strong p-10 text-center">
-          <div className="tag tag-violet mb-4">assistant directory</div>
-          <div className="font-medium mb-1">No assistants yet</div>
+          <div className="tag tag-violet mb-4">agent directory</div>
+          <div className="font-medium mb-1">No agents yet</div>
           <p className="text-sm text-[color:var(--color-ink-muted)] max-w-sm mx-auto">
-            The fastest start: <strong>Create hosted assistant</strong> sets up an assistant you can chat with right away. <strong>Connect your own</strong> gives you an API key for an assistant running on your computer.
+            The fastest start creates a hosted assistant you can chat with
+            right away. Connecting a local agent links Claude Code, OpenClaw or
+            another runtime running on your computer.
           </p>
           <div className="flex justify-center gap-2 mt-5">
             <Link href="/app/agents/connect" className="btn btn-primary">
               Create hosted assistant
             </Link>
             <Link href="/app/agents/new" className="btn btn-secondary">
-              Connect your own
+              Connect local agent
             </Link>
           </div>
         </div>

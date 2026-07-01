@@ -144,15 +144,15 @@ export default async function DeviceAuthPage({
         href="/app/agents"
         className="text-sm text-[color:var(--color-ink-muted)] hover:text-[color:var(--color-ink)]"
       >
-        ← Back to assistants
+        ← Back to my agents
       </Link>
       <header className="mt-4 page-header-row">
         <div>
           <div className="page-kicker">Device approval</div>
           <h1 className="page-title">Connect a device</h1>
           <p className="page-subtitle">
-            An assistant on your computer showed you a code. Enter it below to
-            link that assistant to your account — no key copy-pasting.
+            A local agent on your computer showed you a code. Enter it below to
+            link that agent to your account — no key copy-pasting.
           </p>
         </div>
       </header>

@@ -6,11 +6,13 @@ import { createAgentForUser } from "../../lib/agents";
 import {
   createDirectConversation,
   sendMessage,
+  saveAttachment,
   editMessage,
   deleteMessage,
   toggleReaction,
   EDIT_DELETE_WINDOW_MS,
 } from "../../lib/conversations";
+import { GET as getBlob } from "../../app/api/v1/blobs/[id]/route";
 
 let NOW = 1_700_000_000_000;
 const RealDateNow = Date.now;
@@ -45,11 +47,11 @@ function seedTwoAgents() {
     )
     .run(userB, "b@t.test", "B", "x".repeat(128), "y".repeat(32), NOW);
 
-  const { agent: a } = createAgentForUser(userA, {
+  const { agent: a, apiKey: apiKeyA } = createAgentForUser(userA, {
     handle: "alpha",
     display_name: "Alpha",
   });
-  const { agent: b } = createAgentForUser(userB, {
+  const { agent: b, apiKey: apiKeyB } = createAgentForUser(userB, {
     handle: "bravo",
     display_name: "Bravo",
   });
@@ -59,7 +61,7 @@ function seedTwoAgents() {
       "INSERT INTO friendships (agent_a, agent_b, created_at) VALUES (?, ?, ?)",
     )
     .run(x, y, NOW);
-  return { userA, userB, agentA: a, agentB: b };
+  return { userA, userB, agentA: a, agentB: b, apiKeyA, apiKeyB };
 }
 
 describe("editMessage authorization + window", () => {
@@ -172,6 +174,32 @@ describe("deleteMessage tombstone semantics", () => {
 
     assert.equal(after1.n, 1);
     assert.equal(after2.n, 1);
+  });
+
+  it("stops serving attachments once their message is deleted", async () => {
+    const { agentA, agentB, apiKeyB } = seedTwoAgents();
+    const conv = createDirectConversation("usr_test_a", agentA.id, agentB.id);
+    const att = saveAttachment(agentA.id, {
+      filename: "note.txt",
+      mime_type: "text/plain",
+      bytes: Buffer.from("secret note"),
+    });
+    const m = sendMessage(conv.id, agentA.id, {
+      text: "with file",
+      attachment_ids: [att.id],
+    });
+    const req = () =>
+      new Request(`http://test.local/api/v1/blobs/${att.id}`, {
+        headers: { authorization: `Bearer ${apiKeyB}` },
+      });
+
+    const before = await getBlob(req(), { params: Promise.resolve({ id: att.id }) });
+    assert.equal(before.status, 200);
+
+    deleteMessage(m.id, agentA.id);
+
+    const after = await getBlob(req(), { params: Promise.resolve({ id: att.id }) });
+    assert.equal(after.status, 403);
   });
 });
 

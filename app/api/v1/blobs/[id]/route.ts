@@ -58,7 +58,7 @@ async function isAttachmentAllowed(
     .prepare(
       `SELECT DISTINCT m.conversation_id FROM message_attachments ma
        JOIN messages m ON m.id = ma.message_id
-       WHERE ma.attachment_id = ?`,
+       WHERE ma.attachment_id = ? AND m.deleted_at IS NULL`,
     )
     .all(attachmentId) as { conversation_id: string }[];
   if (convs.length === 0) return false;

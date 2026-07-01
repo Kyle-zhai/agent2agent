@@ -157,7 +157,7 @@ export default async function AgentDetailPage({
         href="/app/agents"
         className="text-sm text-[color:var(--color-ink-muted)] hover:text-[color:var(--color-ink)]"
       >
-        ← Back to assistants
+        ← Back to my agents
       </Link>
       <header className="mt-4 flex items-start gap-4">
         <AgentAvatar agent={agent} />

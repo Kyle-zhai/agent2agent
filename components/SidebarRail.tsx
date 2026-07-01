@@ -21,14 +21,7 @@ export type RailItem = {
 };
 
 /**
- * Narrow icon rail (60px) on the left of the app shell. Hermes-style:
- *   - section icons in a vertical strip
- *   - violet pill highlight on the active section
- *   - tooltip on hover (CSS-only)
- *   - bottom slot holds avatar + log-out menu
- *
- * Splitting this into a client component lets us use usePathname for the
- * active-state without polluting the server-rendered layout shell.
+ * White product rail used by the Partner onboarding workbench shell.
  */
 export function SidebarRail({
   items,
@@ -74,21 +67,30 @@ export function SidebarRail({
   return (
     <nav
       aria-label="Primary navigation"
-      className="rail-nav shrink-0 w-[72px] h-full flex flex-col items-center py-3 gap-1 z-30 rounded-[26px] bg-[color:var(--color-rail)] shadow-[var(--shadow-float)]"
+      className="rail-nav z-30 flex h-full w-[190px] shrink-0 flex-col gap-5 border-r border-[color:var(--color-line)] bg-white py-7"
     >
       <Link
         href="/app"
-        className="block w-10 h-10 rounded-[13px] flex items-center justify-center bg-white text-[color:var(--color-ink)] text-[12px] font-bold tracking-tight mb-3"
-        style={{ boxShadow: "0 2px 8px -3px rgba(0, 0, 0, 0.45)" }}
+        className="mx-7 text-[26px] font-semibold tracking-tight text-[color:var(--color-ink)]"
         title="Agent2Agent"
         aria-label="Agent2Agent home"
       >
-        A2
+        A2A
+      </Link>
+
+      <Link
+        href="/app"
+        className="mx-4 flex items-center justify-between rounded-lg border border-[color:var(--color-line)] bg-white px-3 py-2 text-[12px] font-medium text-[color:var(--color-ink)] hover:bg-[color:var(--color-hover)]"
+      >
+        <span className="truncate">Agent2Agent</span>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="m6 9 6 6 6-6" />
+        </svg>
       </Link>
 
       <div
         ref={listRef}
-        className="relative flex-1 flex flex-col items-center gap-1 w-full px-1.5"
+        className="relative flex flex-1 flex-col gap-2 px-3"
       >
         {pill ? (
           <span
@@ -119,11 +121,24 @@ export function SidebarRail({
         })}
       </div>
 
-      <div className="relative w-full flex justify-center mt-1">
+      <Link
+        href="/app/settings"
+        className={
+          "mx-3 flex items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] font-medium transition-colors " +
+          (pathname.startsWith("/app/settings")
+            ? "bg-[#eef4ff] text-[color:var(--color-tint-blue-ink)]"
+            : "text-[color:var(--color-ink)] hover:bg-[color:var(--color-hover)]")
+        }
+      >
+        <RailIcon name="settings" />
+        <span>Settings</span>
+      </Link>
+
+      <div className="relative mx-3">
         <button
           type="button"
           onClick={() => setMenuOpen((v) => !v)}
-          className="w-9 h-9 rounded-full overflow-hidden border border-white/20 hover:border-white/55 transition-colors"
+          className="flex w-full items-center gap-2 rounded-xl border border-[color:var(--color-line)] bg-white px-2 py-2 text-left transition-colors hover:bg-[color:var(--color-hover)]"
           aria-label="Account menu"
           title={userName}
         >
@@ -131,13 +146,24 @@ export function SidebarRail({
             <img
               src={avatarSrc}
               alt=""
-              className="w-full h-full object-cover"
+              className="h-8 w-8 rounded-full object-cover"
             />
           ) : (
-            <span className="block w-full h-full flex items-center justify-center text-[13px] font-medium text-[color:var(--color-ink)] bg-[color:var(--color-tint-violet)]">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[13px] font-medium text-[color:var(--color-ink)] bg-[color:var(--color-tint-violet)]">
               {userInitial}
             </span>
           )}
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[12px] font-medium text-[color:var(--color-ink)]">
+              {userName}
+            </span>
+            <span className="block truncate text-[10px] text-[color:var(--color-ink-soft)]">
+              {userEmail}
+            </span>
+          </span>
+          <svg className="shrink-0 text-[color:var(--color-ink-soft)]" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="m6 9 6 6 6-6" />
+          </svg>
         </button>
         {menuOpen ? (
           <div
@@ -225,19 +251,19 @@ function RailButton({
       title={label}
       aria-current={active ? "page" : undefined}
       className={
-        "group relative z-10 w-[60px] py-2 rounded-2xl flex flex-col items-center justify-center gap-1 transition-[color,background-color] duration-[320ms] " +
+        "group relative z-10 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 transition-[color,background-color] duration-[320ms] " +
         (active
-          ? "text-[color:var(--color-ink)] font-semibold"
-          : "text-[color:var(--color-rail-ink)] hover:bg-[color:var(--color-rail-soft)] hover:text-white")
+          ? "text-[color:var(--color-tint-blue-ink)] font-semibold"
+          : "text-[color:var(--color-ink)] hover:bg-[color:var(--color-hover)]")
       }
     >
       <RailIcon name={icon} />
-      <span className="text-[10px] leading-tight text-center px-1 truncate w-full font-medium tracking-tight">
+      <span className="min-w-0 flex-1 truncate text-[13px] font-medium tracking-tight">
         {shortLabel}
       </span>
       {badge && badge > 0 ? (
         <span
-          className="absolute top-1 right-2 min-w-[16px] h-[16px] px-1 rounded-full bg-[color:var(--color-danger)] text-white text-[9px] font-semibold flex items-center justify-center"
+          className="ml-auto min-w-[19px] h-[19px] px-1.5 rounded-full bg-[color:var(--color-tint-blue)] text-[color:var(--color-tint-blue-ink)] text-[10px] font-semibold flex items-center justify-center"
           aria-label={`${badge} unread`}
         >
           {badge > 99 ? "99+" : badge}
@@ -265,6 +291,15 @@ function RailIcon({ name }: { name: string }) {
     "aria-hidden": true,
   };
   switch (name) {
+    case "workspace":
+      return (
+        <svg {...common}>
+          <rect x="4" y="4" width="6" height="6" rx="1.4" />
+          <rect x="14" y="4" width="6" height="6" rx="1.4" />
+          <rect x="4" y="14" width="6" height="6" rx="1.4" />
+          <rect x="14" y="14" width="6" height="6" rx="1.4" />
+        </svg>
+      );
     case "home":
       return (
         <svg {...common}>

@@ -1,21 +1,12 @@
 @import "tailwindcss";
 
 /* ---------------------------------------------------------------------------
- *  Soft Studio — light, floating, premium product UI
+ *  Partner Workbench — exact white multi-pane product UI
  *
- *  A redesign that keeps the calm light direction but overturns the flat
- *  edge-to-edge Notion look. Two references drive it:
- *    - a Lark/IM chat (gradient avatars, two-tone rounded bubbles, file +
- *      handoff cards, skill chips)
- *    - a logistics dashboard (floating rounded panels detached on a soft
- *      neutral canvas, chunky radii, diffuse shadows, pastel-gradient
- *      accent cards)
- *
- *  Layout convention: `--color-canvas` is the soft neutral backdrop the whole
- *  shell sits on; the rail, conversation panel and content stage float on it
- *  as white rounded cards (`.panel-float`). `--color-paper` is the white
- *  surface cards/popovers are built from. Color and depth serve legibility
- *  and state; pastel gradients are reserved for a few accent moments.
+ *  Layout convention: the main `/app` surface follows the selected figure-1
+ *  screenshot: white left rail, white Files tree, central preview workbench
+ *  and right Team Agent chat rail. Cards are reserved for contained objects
+ *  inside those panes, not for the panes themselves.
  *
  *  Token NAMES are kept identical to the previous theme so component code
  *  keeps working — only VALUES change and a few new tokens/classes are added.
@@ -30,7 +21,7 @@
 
   /* Soft neutral canvas + crisp white floating surfaces. The canvas sits
    * clearly below white so the rail / list / chat stage read as floating. */
-  --color-canvas: #ecebf1;
+  --color-canvas: #ffffff;
   --color-paper: #ffffff;
   --color-paper-strong: #ffffff;
   --color-paper-faint: #f6f5f7;
@@ -60,13 +51,12 @@
   --color-danger: #e0494a;
   --color-danger-tint: #fbe5e5;
 
-  /* Monochrome accent — near-black is the brand action colour. Used by
-   * .btn-primary, the send button, focus rings and active text. No blue. */
-  --color-accent: #1b1b22;
-  --color-accent-hover: #000000;
-  --color-accent-glow: rgba(20, 20, 26, 0.24);
+  /* Primary action blue from the selected Partner onboarding reference. */
+  --color-accent: #0b5cff;
+  --color-accent-hover: #084fd6;
+  --color-accent-glow: rgba(11, 92, 255, 0.28);
 
-  /* Black navigation rail. */
+  /* Legacy rail tokens retained for older room/dock components. */
   --color-rail: #17171c;
   --color-rail-ink: rgba(255, 255, 255, 0.64);
   --color-rail-soft: rgba(255, 255, 255, 0.08);
@@ -150,13 +140,13 @@ html, body {
   outline-offset: 2px;
   border-radius: 8px;
 }
-/* Light focus rings on the black navigation rail. */
+/* Focus rings inside the white navigation rail. */
 .rail-nav *:focus-visible {
-  outline: 2px solid rgba(255, 255, 255, 0.75);
+  outline: 2px solid rgba(31, 95, 200, 0.5);
   outline-offset: 2px;
 }
 
-/* Sliding white "notch" pill behind the active rail item. Its translate(x,y)
+/* Sliding blue "notch" pill behind the active rail item. Its translate(x,y)
  * is set inline (x = -50% to centre, y = the active item's offsetTop); the
  * slide + resize are animated here. Reduced-motion is handled by the global
  * transition kill-switch at the bottom of this file. */
@@ -164,12 +154,11 @@ html, body {
   position: absolute;
   top: 0;
   left: 50%;
-  width: 60px;
-  border-radius: 16px;
-  background: #fff;
+  width: calc(100% - 16px);
+  border-radius: 12px;
+  background: #eef4ff;
   box-shadow:
-    0 2px 10px -3px rgba(0, 0, 0, 0.5),
-    inset 0 0 0 1px rgba(0, 0, 0, 0.04);
+    inset 0 0 0 1px rgba(31, 95, 200, 0.06);
   transition:
     transform 360ms cubic-bezier(0.22, 1, 0.36, 1),
     height 360ms cubic-bezier(0.22, 1, 0.36, 1);
@@ -206,15 +195,27 @@ html, body {
  *  App page system
  * ------------------------------------------------------------------------ */
 .app-stage {
-  width: min(100%, 1360px);
-  margin: 0 auto;
-  padding: 28px clamp(18px, 3vw, 40px) 40px;
+  width: 100%;
+  min-height: 100%;
+  margin: 0;
+  padding: 0;
+  background: var(--color-paper);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  overflow: hidden;
 }
 
 .app-stage-wide {
-  width: min(100%, 1540px);
-  margin: 0 auto;
-  padding: 22px clamp(14px, 2vw, 28px) 32px;
+  width: 100%;
+  min-height: 100%;
+  margin: 0;
+  padding: 0;
+  background: var(--color-paper);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  overflow: hidden;
 }
 
 .page-kicker {
@@ -248,7 +249,10 @@ html, body {
   align-items: flex-start;
   justify-content: space-between;
   gap: 18px;
-  margin-bottom: 24px;
+  margin: 0 0 20px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--color-line);
+  background: var(--color-paper-strong);
 }
 
 .module-panel {

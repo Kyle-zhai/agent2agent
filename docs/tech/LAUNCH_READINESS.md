@@ -17,7 +17,7 @@ links: [[INDEX]], [[SECURITY]], [[OPERATIONS]], [[STATUS_REPORT]], [[UX_AUDIT]],
 > Postgres 迁移步骤在 [[OPERATIONS]]。
 >
 > 审计方法：两路独立审查（安全/运维 + 产品完整性）逐项对码取证，**3 个阻塞项当场修复**
-> （见下），终态 **402/402 测试、tsc/build 干净**。
+> （见下），当前终态 **445/445 测试、tsc/build 干净**。
 
 ## 一、本次审查发现并已修复的阻塞项 ✅
 
@@ -35,7 +35,7 @@ links: [[INDEX]], [[SECURITY]], [[OPERATIONS]], [[STATUS_REPORT]], [[UX_AUDIT]],
 **滥用防护**：注册/登录 per-IP + 常量键全局双桶（伪造 XFF 无法绕过）、设备码查询同样双桶、消息/心跳/工作区读写全部限流、附件 25MB×10 + magic-byte 嗅探。
 **权限与隐私**：grant 真强制（铸造验权 + 使用时验签 + 双方可撤 + handoff 完成级联回收）；邮箱对其他用户零泄露（联系人/搜索/API/A2A 卡全查过）；私聊 dock 真私有；脱敏交接计数式永不静默。
 **协作闭环**：邀请链接全流程、群管理、handoff 可发现（面板 + Inbox 角标）、助手失败在房间内可见、reply 队列崩溃自愈（lease + 幂等）。
-**工程卫生**：迁移幂等（ensureColumn）、无界表全有 TTL 清扫、出站 SSRF 闸完备、品牌 404/错误页/加载骨架齐全、**402/402 测试 + tsc + build 干净**。
+**工程卫生**：迁移幂等（ensureColumn）、无界表全有 TTL 清扫、出站 SSRF 闸完备、品牌 404/错误页/加载骨架齐全、**445/445 测试 + tsc + build 干净**。
 
 ## 三、开放注册前必须解决（结构性 NO-GO 项）
 
@@ -71,4 +71,5 @@ npm run db:init && npm run build && npm start
 ## 六、复审记录
 
 - 2026-06-11 首次：双路审计 19 项发现 → 3 阻塞已修 / 6 警告留单 / 30+ 达标确认；终态 402/402。
-- 2026-06-11 增补：**邮件能力交付（v0.26）** —— 自助密码找回（`/forgot`→`/reset`，一次性 token + 防枚举 + 重置吊销全部会话）、邮箱验证（`/verify-email`，`A2A_REQUIRE_EMAIL_VERIFICATION` 可选门禁）、零依赖可插拔 mailer（`lib/mailer.ts`：console/resend/webhook）。开放注册 NO-GO 从 3 项降为 2 项（Postgres + 成本边界）；+8 测试，终态 **435/435**。同时 §五操作清单的"忘记密码 → CLI"可改为用户自助 `/forgot`（CLI 仍保留为运营兜底）。
+- 2026-06-11 增补：**邮件能力交付（v0.26）** —— 自助密码找回（`/forgot`→`/reset`，一次性 token + 防枚举 + 重置吊销全部会话）、邮箱验证（`/verify-email`，`A2A_REQUIRE_EMAIL_VERIFICATION` 可选门禁）、零依赖可插拔 mailer（`lib/mailer.ts`：console/resend/webhook）。开放注册 NO-GO 从 3 项降为 2 项（Postgres + 成本边界）；+8 测试。同时 §五操作清单的"忘记密码 → CLI"可改为用户自助 `/forgot`（CLI 仍保留为运营兜底）。
+- 2026-06-30 修复复审：离线构建去除 Google Fonts 依赖；邮箱验证门禁接入 session 创建边界；OAuth-only 账号可设置初始密码；登录/注册保留 `next` 深链；删除消息后附件下载断权；A2A client 测试改为内存 fetch fixture，避免受限环境 `listen()` 挂起。终态 **445/445**，`tsc` + `next build` 干净。

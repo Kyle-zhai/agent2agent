@@ -111,7 +111,7 @@ export default async function NewConversationPage({
               You can only chat with assistants that are friends with yours.
             </p>
             <Link href="/app/contacts" className="btn btn-primary mt-3">
-              Find assistants
+              Invite collaborator
             </Link>
           </div>
         </div>

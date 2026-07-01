@@ -611,20 +611,6 @@ export const TOOLS: Record<string, Tool> = {
   [agentSendMessage.name]: agentSendMessage,
 };
 
-export function listToolSchemas(): Array<{
-  name: string;
-  description: string;
-  requires_capability: string;
-  schema: ToolSchema;
-}> {
-  return Object.values(TOOLS).map((t) => ({
-    name: t.name,
-    description: t.description,
-    requires_capability: t.requires_capability,
-    schema: t.schema,
-  }));
-}
-
 export function listToolsForAgent(agent: Agent): Array<{
   name: string;
   description: string;
@@ -756,31 +742,4 @@ export async function invokeTool(
     });
     return { ok: false, invocation_id: id, error: msg };
   }
-}
-
-export function listInvocations(
-  agentId: string,
-  limit = 50,
-): Array<{
-  id: string;
-  tool_name: string;
-  duration_ms: number | null;
-  error: string | null;
-  task_id: string | null;
-  created_at: number;
-}> {
-  return db()
-    .prepare(
-      `SELECT id, tool_name, duration_ms, error, task_id, created_at
-       FROM tool_invocations WHERE agent_id = ?
-       ORDER BY created_at DESC LIMIT ?`,
-    )
-    .all(agentId, limit) as Array<{
-    id: string;
-    tool_name: string;
-    duration_ms: number | null;
-    error: string | null;
-    task_id: string | null;
-    created_at: number;
-  }>;
 }

@@ -10,11 +10,11 @@ links: [[INDEX]], [[ROADMAP]], [[FEATURES]], [[V021_ACCEPTANCE]], [[UX_AUDIT]], 
 # 现状报告
 
 > [!summary]
-> 截至 **v0.24**（2026-06-11，工作树含未提交的 v0.21–v0.24 批次），产品形态是
+> 截至 **v0.26+**（2026-06-30，工作树含未提交的 v0.21–v0.26 批次），产品形态是
 > "**人与 AI 助手共事的协作平台**"：群聊、共享版本化文件、聊天内建任务、跨用户
-> handoff/grant、双向 A2A 协议互通、统一 Inbox。核心能力全部落地，**391/391 测试
+> handoff/grant、双向 A2A 协议互通、统一 Inbox。核心能力全部落地，**445/445 测试
 > 通过、tsc/build 干净**。但按"陌生人注册就能用"的标准衡量，还有几条**硬差距**
-> （账号找回、邮件、数据库、LLM 计费）。本文分三层：已完成 / 上线硬差距 / polish。
+> （数据库、LLM 计费、配额和运维）。本文分三层：已完成 / 上线硬差距 / polish。
 > 无浮夸。逐项明细以 [[FEATURES]] 为准（如果描述和代码不一致，以代码为准）。
 
 ## 已完成 ✅（能力组级别）
@@ -39,7 +39,7 @@ links: [[INDEX]], [[ROADMAP]], [[FEATURES]], [[V021_ACCEPTANCE]], [[UX_AUDIT]], 
 
 ## 测试 & build 状态
 
-- 测试：**391/391 全过**（`npm test`，本批从 298 → 391）
+- 测试：**445/445 全过**（`npm test`）
 - TypeScript：`npx tsc --noEmit` clean
 - Build：`next build` clean
 - 真机走查：v0.21 验收 + 双用户复杂场景 + UX 三视口审计，见 [[V021_ACCEPTANCE]] 与 [[UX_AUDIT]]
@@ -48,19 +48,18 @@ links: [[INDEX]], [[ROADMAP]], [[FEATURES]], [[V021_ACCEPTANCE]], [[UX_AUDIT]], 
 
 | # | 差距 | 现状（已对照代码） | 后果 |
 |---|---|---|---|
-| 1 | **无密码重置** | `lib/auth.ts` 只有注册 / 登录 / 登录态下改密码；全仓无 forgot/reset 路径 | 用户忘记密码 = 账号永久失联，无任何自助或人工通道 |
-| 2 | **无邮箱验证** | `signUp` 直接激活账号，邮箱真假不查 | 任意伪造邮箱注册；后续任何"发邮件给用户"的能力都建立在假地址上 |
-| 3 | **没有邮件系统** | `package.json` 零邮件依赖，全仓无发信代码 | 上面两条的根因；密码重置、验证、通知都没有载体。需选型（SMTP/Resend/SES）+ 模板 + 限流 |
-| 4 | **SQLite 单写者** | `better-sqlite3` 单文件 + 本地 `blobs/`，必须单实例长驻进程 | 不能上 Serverless / 多实例 / 水平扩展；并发写靠同步串行扛。Postgres 迁移是卡口，步骤已写在 [[ROADMAP#Postgres 迁移]] 与 [[OPERATIONS]] |
-| 5 | **LLM key 服务端付费** | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` 是运营者的 key，无 per-user 配额/计费 | 开放注册 = 任何人花你的钱；需要 per-user key（BYO）或用量配额 + 计费，见 [[ROADMAP]] |
+| 1 | **SQLite 单写者** | `better-sqlite3` 单文件 + 本地 `blobs/`，必须单实例长驻进程 | 不能上 Serverless / 多实例 / 水平扩展；并发写靠同步串行扛。Postgres 迁移是卡口，步骤已写在 [[ROADMAP#Postgres 迁移]] 与 [[OPERATIONS]] |
+| 2 | **LLM key 服务端付费** | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` 是运营者的 key，无 per-user 配额/计费 | 开放注册 = 任何人花你的钱；需要 per-user key（BYO）或用量配额 + 计费，见 [[ROADMAP]] |
+| 3 | **无 per-user 存储配额** | 附件和 workspace blob 有单文件上限，但没有账号总量上限 | 公开注册时可被磁盘填满；需要用户/工作区级 byte quota + 清理策略 |
+| 4 | **真实邮件交付需配置** | 自助密码找回、邮箱验证、console/resend/webhook mailer 已有；console 只打日志 | 公共服务需配置 Resend/SES/webhook、发信域名、退信处理和监控 |
 
-这五条互相咬合：1/2 依赖 3；4 决定部署形态；5 决定商业模式。**当前形态适合**：
+这些条目互相咬合：数据库决定部署形态，LLM key/配额决定商业模式，存储和邮件决定公共服务韧性。**当前形态适合**：
 自部署（个人/团队内网、Cloudflare Tunnel 给熟人用），设好 `SESSION_SECRET`、
 自己的 LLM key，单机跑。**不适合**：公开注册的多租户服务。
 
 ## 次级差距（上线前应做，但不阻塞熟人使用）
 
-- **无 CI** —— 391 个测试只在本地跑，没有 pipeline 强制
+- **无 CI** —— 445 个测试只在本地跑，没有 pipeline 强制
 - **无结构化日志 / metrics endpoint** —— 只有 console + audit_log，运维半盲
 - **备份只有导出** —— `/app/settings/export` 有，恢复/上传式 restore 没有
 - **2FA / E2E 加密 / WAF** —— 见 [[SECURITY]]，均为 roadmap 项

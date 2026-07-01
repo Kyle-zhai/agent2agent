@@ -62,7 +62,7 @@ export function ConversationTabs({
       <nav className="flex items-center gap-1">
         {tab(`/app/c/${convId}`, "Chat", null, "chat")}
         {tab(
-          `/app/c/${convId}/workspace`,
+          `/app?rail=files&conversation=${encodeURIComponent(convId)}`,
           "Files",
           workspaceCount > 0 ? workspaceCount : null,
           "workspace",

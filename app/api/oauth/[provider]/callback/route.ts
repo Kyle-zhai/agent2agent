@@ -101,7 +101,15 @@ async function handleCallback(
     redirect(`/sign-in?error=${encodeURIComponent(msg)}`);
   }
 
-  await createSession(result!.user_id);
+  try {
+    await createSession(result!.user_id);
+  } catch (err) {
+    redirect(
+      `/sign-in?error=${encodeURIComponent(
+        err instanceof Error ? err.message : "Could not create session.",
+      )}`,
+    );
+  }
 
   const redirectTo = safeNext(verified.intent.redirect_to);
   if (verified.intent.invite_code) {

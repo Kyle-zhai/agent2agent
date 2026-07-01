@@ -11,8 +11,6 @@ import {
 import {
   createTask,
   getTask,
-  listTasksAssignedTo,
-  listTasksOwnedBy,
   transitionTaskStatus,
 } from "./tasks";
 import { newId } from "./ids";
@@ -1018,17 +1016,6 @@ export async function handleCancelTask(
     actor_agent_id: callerAgentId,
   });
   return projectTask(getTask(t.id)!);
-}
-
-export function listTasksForAgentA2A(agentId: string): A2ATask[] {
-  const seen = new Set<string>();
-  const out: A2ATask[] = [];
-  for (const t of [...listTasksAssignedTo(agentId), ...listTasksOwnedBy(agentId)]) {
-    if (seen.has(t.id)) continue;
-    seen.add(t.id);
-    out.push(projectTask(t));
-  }
-  return out;
 }
 
 // ---------------------------------------------------------------------------

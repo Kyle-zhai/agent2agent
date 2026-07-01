@@ -41,6 +41,10 @@ const CSP_DEV = [
 export default function proxy(req: NextRequest): NextResponse {
   const res = NextResponse.next();
   const isApi = req.nextUrl.pathname.startsWith("/api/");
+  // Exact segment match — a bare startsWith("/app") would also capture
+  // /apple-touch-icon.png and any future /app* sibling route.
+  const isApp =
+    req.nextUrl.pathname === "/app" || req.nextUrl.pathname.startsWith("/app/");
   const isProd = process.env.NODE_ENV === "production";
 
   for (const [k, v] of Object.entries(SECURITY_HEADERS)) {
@@ -48,6 +52,24 @@ export default function proxy(req: NextRequest): NextResponse {
   }
   res.headers.set("Content-Security-Policy", isProd ? CSP_DEFAULT : CSP_DEV);
   res.headers.delete("X-Powered-By");
+
+  if (isApp && !req.cookies.get("a2a_session")?.value) {
+    const url = req.nextUrl.clone();
+    url.pathname = "/sign-in";
+    url.search = `?next=${encodeURIComponent(
+      `${req.nextUrl.pathname}${req.nextUrl.search}`,
+    )}`;
+    const redirect = NextResponse.redirect(url);
+    for (const [k, v] of Object.entries(SECURITY_HEADERS)) {
+      redirect.headers.set(k, v);
+    }
+    redirect.headers.set(
+      "Content-Security-Policy",
+      isProd ? CSP_DEFAULT : CSP_DEV,
+    );
+    redirect.headers.delete("X-Powered-By");
+    return redirect;
+  }
 
   if (isApi) {
     const origin = req.headers.get("origin");

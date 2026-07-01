@@ -1,68 +1,91 @@
 # Design
 
-Visual system of record for Agent2Agent. Theme name: **Mono Studio** — a light app with a **monochrome (near-black + white) command system** and **pastel-gradient accent cards**, derived from the logistics-dashboard reference and adapted to a chat product. Black is the brand action color: it carries the navigation rail and every primary action. Color enters only through small semantic tags, vivid gradient avatars, and a few pale gradient cards. Source of truth: `app/globals.css` (`@theme` tokens) + shared component classes. See also `PRODUCT.md`.
+Visual system of record for Agent2Agent. Theme name: **Partner Workbench**.
+The current source of truth is the user-approved figure-1 mockup: a white
+multi-pane AI workbench with a project file tree, a central live preview, and a
+right-side agent execution/chat rail.
+
+## Source Of Truth
+
+- **Reference:** latest user screenshot, `codex-clipboard-904ca003...png`.
+- **Implementation target:** `/app` at `1536 x 1024`.
+- **Verification capture:** `tmp/a2a-app-capture.png`.
+- **Reference avatar crops:** `public/product-design/iris-liu.png`,
+  `public/product-design/tom-zhao.png`,
+  `public/product-design/sophia-chen.png`.
 
 ## Theme
 
-- **Mode:** light only (`color-scheme: light`). The app surface stays white/light; **black is an accent, not a dark theme.** The retired dark "Hermes" theme is not revived.
-- **Register:** product (the conversation is the product; chrome floats around it).
-- **Color strategy:** Monochrome base + pastel accents. Near-black + white do the structural and action work; one pastel-gradient family warms a few hero surfaces; semantic hue (amber/green/violet/pink) is reserved for status and identity. No cobalt/blue primary.
-- **Reference DNA (logistics dashboard):** black floating rounded rail with a white-pill active state; black rounded action buttons; pale gradient feature cards (lavender→pink, blue→lavender→mint); heavy rounding; pill search; thin monochrome line icons; status pills with a colored dot; airy whitespace; soft diffuse shadows.
-
-## Color palette (hex, defined in `@theme`)
-
-| Token | Value | Role |
-|---|---|---|
-| `--color-canvas` | `#e7e6ed` | Soft cool-gray shell backdrop; panels float on it |
-| `--color-paper` / `-strong` | `#ffffff` | White floating-panel + card surface |
-| `--color-paper-faint` | `#f3f3f6` | Recessed insets, **incoming** bubbles, code, kbd, neutral active fill |
-| `--color-ink` | `#1d1d24` | Near-black primary text |
-| `--color-ink-muted` | `#56555f` | Secondary text (AA on white) |
-| `--color-ink-soft` | `#6e6d78` | Meta / placeholders (held ≥4.5:1 on white) |
-| `--color-line` / `-strong` | `rgba(29,29,36,.08)` / `.14` | Hairlines, input borders |
-| `--color-accent` / `-hover` | `#1b1b22` / `#000000` | **Primary action** = near-black: buttons, send, focus ring, active text |
-| `--color-rail` | `#17171c` | Black navigation rail |
-| `--color-rail-ink` / `-soft` | `rgba(255,255,255,.64)` / `.08` | Rail inactive icon+label / rail hover fill |
-| `--color-bubble-out` | `#20202a` | Outgoing chat bubble (white text on it) |
-| `--color-tint-{blue,green,amber,violet,pink}` (+ `-ink`) | soft fill + saturated ink | Semantic tags, callouts, handoff status, reactions — **not** primary action |
-| `--color-danger` / `-tint` | `#e0494a` / `#fbe5e5` | Destructive |
-| `--color-hover` / `-strong` | `rgba(29,29,36,.05)` / `.085` | Dark-on-light hover + neutral selection (never `bg-white/N`) |
-
-**Gradients (accent cards only):** `--grad-hero` lavender→lilac→soft-pink (create/start surfaces, echoes "Add new package"); `--grad-cool` blue→lavender→mint (echoes the tracking card); plus `--grad-violet/blue/amber`. Applied via `.hero-card` / `.grad-*`. Used on: home hero, own-agent dock header, proposed handoff card, empty states. Surfaces stay white otherwise. Text on gradients is dark ink (AA).
-
-**Avatars (identity = information):** vivid gradient discs `.av-grad-1..6` chosen deterministically by `avatarGradClass(id)` in `lib/avatar.ts`, agent emoji on top. They are the colorful counterweight to the monochrome chrome (the chat analog of the reference's colored brand squares).
-
-## Typography
-
-- **Family:** Inter (`--font-sans`) for everything; `--font-mono` JetBrains Mono for ids/code/kbd. Fixed rem scale (product UI). Bold weights for titles, medium for labels, muted gray for secondary; tight tracking on large headings.
-- **Scale:** page titles ~30–32px/700; section headings 15–22px/600; body 14–15px; meta 10.5–13px. `text-wrap: balance` on headings.
-
-## Shape, depth & motion
-
-- **Radii (chunky, per reference):** `--radius-panel 26`, `--radius-card 20`, `--radius-bubble 20`, `--radius-input 14`, `--radius-btn 12`, `--radius-pill 999`.
-- **Shadows:** `--shadow-card` (resting), `--shadow-pop` (popovers/menus/proposed handoff), `--shadow-float` (rail / list / chat stage / dock). Soft, diffuse, layered.
-- **Motion:** 130–180ms ease transitions; `surface-hover` lift; `.pop-in` opt-in entrance for popovers (never the message list, to avoid firing on every `router.refresh()`); typing dots + skeleton shimmer; full `prefers-reduced-motion` off-switch.
+- **Mode:** light only, full white canvas.
+- **Primary action:** reference blue `#0b5cff`; hover `#084fd6`.
+- **Structure:** pane dividers and thin hairlines, not floating app cards.
+- **Depth:** shadows are reserved for popovers, buttons, and preview cards.
+- **Avoid:** black navigation rail, dark command-center styling, oversized
+  circular promo badges like `1 use`, and self-contact directory rows such as
+  Bob/Carol.
 
 ## Layout
 
-- **App shell** (`app/app/layout.tsx`): `min-h-screen flex gap-2.5 p-2.5` on the gray canvas. `SidebarRail` (72px) is a **black** sticky floating rail; `SidebarPanel` (268px) is a white sticky `.panel-float` card; both at `h-[calc(100vh-1.25rem)]`. `main` is transparent — pages render their own white cards on the canvas.
-- **Rail:** icon + compact label per item; the active item is marked by a single **white rounded pill that slides** between items (`.rail-pill`, position measured from the active link, animated with a 360ms ease-out transform). Active icon+label sit on it in near-black; inactive = `--color-rail-ink` on black, hover `--color-rail-soft`. Logo = white rounded square with black mark; account avatar + logout at the bottom; rail focus rings are light. On a conversation route no rail item is active, so no pill shows.
-- **Conversation page** (`app/app/c/[id]/page.tsx`): three zones, mirroring the reference's "rail · two stacked cards · big right panel". `flex gap-2.5 h-[calc(100vh-1.25rem)]`:
-  - **Middle column** (320px, `flex-col`): **conversation list** on top (`SidebarPanel embedded`, scrolls, `flex-1`) and the **my-agent private chat** below (`OwnAgentDock embedded`, ~42% height). The global shell list self-hides on `/app/c/*` (it folds into this column).
-  - **Right** (fills the rest): the **group conversation** (`ConversationView`) as the large floating stage.
-- **Other pages** flow on the canvas with `.surface` white cards (shell = rail + list panel + content); they cascade automatically from the shared classes.
+The authenticated shell in `app/app/layout.tsx` is fixed and edge-to-edge:
 
-## Components (shared classes)
+- **Left product rail:** `190px`, white, full height. Contains `A2A`, the
+  `Agent2Agent` selector, Home/Workspace/Contacts/Agents/Inbox, Settings, and
+  the signed-in user card. Active state is a pale blue sliding pill.
+- **Top partner bar:** `72px` high, starts after the rail. Contains only the
+  `Partner onboarding` title and star. Collaborator and agent membership is not
+  permanently shown here.
+- **Files panel:** `232px`, white, below the top bar, and visible only on
+  `/app` Workspace. Header says `Files` with search/filter/add icons. Tree
+  content is exactly:
+  `website-launch`, `.codebanana`, `user-guides`, `.gitignore`, `index.html`,
+  `policy-review`, `hhhx's personal agent`, `Project uuux`, `Default`.
+- **Center workbench:** fills the remaining width. It shows the `index.html`
+  tab, breadcrumb/action toolbar, `Preview live`, the NovaMind AI preview, and
+  the four bottom deployment metrics.
+- **Right Team Agent rail:** `505px`, visible from `xl` upward only on `/app`
+  Workspace. It includes the `Partner onboarding` header, `Members`, add, more
+  controls, `Team Agent / My Agent / Discussion` tabs, execution details, agent
+  update notes, file card, invite banner, and composer.
 
-- **Buttons:** `.btn` + `.btn-primary` (**near-black**) / `-secondary` / `-ghost` / `-danger`, sizes `-sm` / `-lg`. Verb-object labels. Primary submit/send actions render as black rounded squares/circles.
-- **Inputs:** `.input` (14px radius, near-black focus ring); the conversation filter is a rounded pill; `.label` (uppercase meta).
-- **Tags:** `.tag` + color variants — status/identity only (`bot`, `external`, grant scopes, handoff status), optionally with a leading dot.
-- **Callouts:** `.callout` + `-blue/-amber/-green` (blue/amber carry a soft gradient).
-- **Surfaces:** `.surface` (+ `.surface-hover`), `.panel-float`, `.hero-card`.
-- **Bubbles:** outgoing = `--color-bubble-out` near-black + **white** text + `rounded-br`; incoming = `--color-paper-faint` gray + dark ink + `rounded-bl`. High-contrast, monochrome.
-- **Avatars:** `.avatar` + `.av-grad-*`.
-- Every interactive element has default/hover/focus/active/disabled; skeletons (`.skeleton-line`) over spinners; empty states teach.
+## Main Page Content
+
+`/app` is no longer a dashboard or a chat list. It is the target workbench:
+
+- The left rail is always present on desktop. The Files panel is Workspace-only.
+- The right chat/execution rail must be present on desktop; do not hide it
+  behind `2xl` only, but it is Workspace-only.
+- The central preview uses the NovaMind AI content shown in the reference:
+  blue logo, nav, blue `Get started`, hero headline, blue `Start for free`,
+  `View demo`, `Getting started`, nested `Consent status`, and the bottom
+  deployment status row.
+- `Consent status` belongs inside the `Getting started` card, matching the
+  reference composition.
+
+## Interaction Language
+
+- `Members` opens participant context for the room. The collaborator strip from
+  the approved reference now lives inside this dropdown: Iris Liu, Tom Zhao,
+  Sophia Chen, Ava's Agent, Milo's Agent, `Invite collaborator`, and
+  `Add my agent`.
+- `Invite collaborator` adds another person's agent from Contacts.
+- `Add my agent` connects or creates one of the user's own local/hosted agents.
+- `Add to this room` offers three choices: `Friend's agent`, `My local agent`,
+  and `Remote A2A agent URL`.
+- Adding someone to a room does not imply write permission; grants still govern
+  scoped workspace access.
+
+## Components
+
+- **Buttons:** `.btn-primary` is blue, `.btn-secondary` is white with a thin
+  border, `.btn-ghost` is text/quiet.
+- **Tags:** semantic only, such as `Agent`, `review`, `Passed`, `Live`.
+- **Cards:** only for objects inside a pane, such as the web preview, file card,
+  status card, popover, composer, and storage card.
+- **Pane shells:** rail, Files, center, and Team Agent are not rounded floating
+  cards.
 
 ## Accessibility
 
-Light theme, WCAG AA: body ≥4.5:1, large/secondary ≥3:1, placeholders held to 4.5:1. Outgoing bubble = white on near-black (≈15:1). Visible focus rings everywhere (near-black on light surfaces, light on the black rail). Color never the only signal (icon/label/weight pair with it). All motion has a reduced-motion fallback.
+Light theme, WCAG AA target. Text uses Inter/system sans. Interactive elements
+must have visible focus rings, hover states, and stable dimensions. Color is
+paired with text/icon cues for status.

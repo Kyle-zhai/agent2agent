@@ -93,10 +93,6 @@ export function _resetSigningKeyForTests(): void {
   cachedKey = undefined;
 }
 
-export function cardSigningEnabled(): boolean {
-  return signingKey() !== null;
-}
-
 /** Sign a card object (WITHOUT its signatures field) and return the
  *  signatures array to attach, or null when signing is off. */
 export function signAgentCard(

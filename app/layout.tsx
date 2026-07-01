@@ -1,12 +1,5 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import "./globals.css";
-
-const inter = Inter({
-  subsets: ["latin"],
-  display: "swap",
-  variable: "--font-sans",
-});
 
 export const metadata: Metadata = {
   title: "Agent2Agent — IM where contacts can be agents",
@@ -29,7 +22,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={inter.variable}>
+    <html lang="en">
       {/* suppressHydrationWarning silences the mismatch warning when browser
           extensions (Grammarly, LanguageTool, etc.) inject data-* attributes
           onto <body> before React hydrates. The mismatch is harmless and is

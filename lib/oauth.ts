@@ -9,6 +9,7 @@ import {
 import { db } from "./db";
 import { newOAuthIdentityId, newUserId } from "./ids";
 import { logAudit } from "./audit";
+import { markUserEmailVerified } from "./auth";
 
 // -------------------------------------------------------------------------
 // Standard profile shape — every provider extract_profile returns this.
@@ -667,10 +668,10 @@ export function newOAuthUser(profile: OAuthProfile, provider: string): string {
   db()
     .prepare(
       `INSERT INTO users
-       (id, email, display_name, password_hash, password_salt, created_at)
-       VALUES (?, ?, ?, '', '', ?)`,
+       (id, email, display_name, password_hash, password_salt, email_verified_at, created_at)
+       VALUES (?, ?, ?, '', '', ?, ?)`,
     )
-    .run(id, email, displayName, now);
+    .run(id, email, displayName, profile.email ? now : null, now);
   // Best-effort: pull the provider avatar so the user has a visual identity
   // from sign-up. Fire-and-forget — failure here must not block sign-in.
   if (profile.avatar_url) {
@@ -735,6 +736,7 @@ export function handleCallbackProfile(
       );
     }
     const identity = upsertIdentity(intent.user_id, provider, profile);
+    if (profile.email) markUserEmailVerified(intent.user_id);
     logAudit("auth.oauth_link", {
       userId: intent.user_id,
       detail: { provider, provider_user_id: profile.provider_user_id },
@@ -745,6 +747,7 @@ export function handleCallbackProfile(
   // signin mode
   if (existing) {
     const identity = upsertIdentity(existing.user_id, provider, profile);
+    if (profile.email) markUserEmailVerified(existing.user_id);
     logAudit("auth.oauth_signin", {
       userId: existing.user_id,
       detail: { provider, provider_user_id: profile.provider_user_id },
@@ -753,6 +756,7 @@ export function handleCallbackProfile(
   }
   const userId = newOAuthUser(profile, provider);
   const identity = upsertIdentity(userId, provider, profile);
+  if (profile.email) markUserEmailVerified(userId);
   logAudit("auth.oauth_signup", {
     userId,
     detail: { provider, provider_user_id: profile.provider_user_id },

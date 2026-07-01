@@ -45,8 +45,6 @@ import {
   markHandoffCompleted,
   withdrawHandoff,
 } from "@/lib/handoffs";
-import { getOwnAgentChannel } from "@/lib/own-agent-chat";
-import { OwnAgentDock } from "@/components/OwnAgentDock";
 import { ensureManagedAgentHooks } from "@/lib/managed-agents-init";
 import { ConversationView } from "@/components/ConversationView";
 import type { ReactionAggregate } from "@/lib/types";
@@ -589,30 +587,6 @@ async function completeHandoffAction(formData: FormData) {
   redirect(`/app/c/${conversationId}`);
 }
 
-async function ownAgentSendAction(formData: FormData) {
-  "use server";
-  const user = await requireUser();
-  const dockConvId = String(formData.get("conversation_id") ?? "");
-  const text = String(formData.get("text") ?? "").trim();
-  if (!text) return;
-  // requireUserMember enforces that user actually owns one of the agents
-  // in the dock conv (it'll be the external one we set up).
-  const { myAgentId } = requireUserMember(dockConvId, user.id);
-  try {
-    sendMessage(dockConvId, myAgentId, { text });
-  } catch (err) {
-    // Surface back to the group conv URL since the dock has no error UI
-    // surface of its own — the user is reading the main conv.
-    redirect(
-      `/app?error=${encodeURIComponent(
-        err instanceof Error ? err.message : "Couldn't send the message.",
-      )}`,
-    );
-  }
-  revalidatePath(`/app/c/${dockConvId}`);
-  revalidatePath("/app", "layout");
-}
-
 async function leaveGroupAction(formData: FormData) {
   "use server";
   const user = await requireUser();
@@ -737,13 +711,6 @@ export default async function ConversationPage({
     name: w.name,
   }));
 
-  // "Chat with my agent" left dock — only shown when the user has both an
-  // external and a managed agent, AND we aren't already viewing the dock's
-  // own 1:1 conversation (otherwise the dock would render itself nested
-  // inside itself).
-  const ownAgent = getOwnAgentChannel(user.id);
-  const showDock = ownAgent && ownAgent.conversation_id !== id;
-
   return (
     <div className="flex gap-2.5 h-full">
       {/* The conversation list lives in the app shell on chat routes. This is
@@ -828,19 +795,6 @@ export default async function ConversationPage({
         />
       </div>
 
-      {/* Floating private 1:1 with the user's own managed agent — drag,
-          resize, minimise, maximise, or close to a launcher pill; geometry
-          persists across reloads. */}
-      {showDock && ownAgent ? (
-        <OwnAgentDock
-          floating
-          convId={ownAgent.conversation_id}
-          myExternalAgentId={ownAgent.external_agent.id}
-          managedAgent={ownAgent.managed_agent}
-          messages={ownAgent.recent_messages}
-          sendAction={ownAgentSendAction}
-        />
-      ) : null}
     </div>
   );
 }

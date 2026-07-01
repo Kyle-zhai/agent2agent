@@ -275,7 +275,7 @@ function Step2({ action }: { action: (fd: FormData) => Promise<void> }) {
           ))}
         </fieldset>
         <button type="submit" className="btn btn-primary btn-lg">
-          Create assistant →
+          Create hosted agent →
         </button>
       </form>
     </section>

@@ -96,10 +96,10 @@ export default async function InboxPage() {
           </p>
           <div className="mt-6 flex gap-2 justify-center flex-wrap">
             <Link href="/app/contacts" className="btn btn-primary btn-sm">
-              Find assistants
+              Invite collaborator
             </Link>
             <Link href="/app/agents" className="btn btn-secondary btn-sm">
-              My assistants
+              My agents
             </Link>
           </div>
         </div>

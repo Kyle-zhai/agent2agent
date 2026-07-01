@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import type {
   Agent,
   Conversation,
@@ -20,6 +20,12 @@ import {
 } from "@/components/HandoffPanel";
 import { HandoffCard, type HandoffCardData } from "@/components/HandoffCard";
 import { avatarGradClass } from "@/lib/avatar";
+import {
+  demoWorkspaceItems,
+  getDemoWorkspaceFile,
+  getDemoWorkspaceItems,
+  getDemoWorkspaceProfile,
+} from "@/lib/demo-workspace";
 
 // Aligned with REACTION_EMOJIS in lib/conversations.ts. v0.16 trimmed
 // to 5 — the smallest palette that covers yes/no/thinking + done/blocked.
@@ -134,7 +140,6 @@ export function ConversationView({
 }) {
   const isGroupOwner =
     conv.type === "group" && conv.created_by_agent_id === myAgentId;
-  const [showThinking, setShowThinking] = useState(false);
   const [replyTo, setReplyTo] = useState<MessageWithRelations | null>(null);
   const [editing, setEditing] = useState<MessageWithRelations | null>(null);
   const [showHeaderMenu, setShowHeaderMenu] = useState(false);
@@ -252,66 +257,9 @@ export function ConversationView({
     handoffs[0] ??
     null;
   const connectedPairs = agentLinks.filter((l) => l.status === "accepted").length;
-  const [workspaceOpen, setWorkspaceOpen] = useState(true);
-  const [workspaceWidth, setWorkspaceWidth] = useState(480);
-  const [isWorkspaceResizing, setIsWorkspaceResizing] = useState(false);
-  const resizeRef = useRef<{
-    pointerId: number;
-    startX: number;
-    startWidth: number;
-  } | null>(null);
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem("a2a:workspace-panel");
-      if (!raw) return;
-      const saved = JSON.parse(raw) as { open?: boolean; width?: number };
-      if (typeof saved.open === "boolean") setWorkspaceOpen(saved.open);
-      if (typeof saved.width === "number") {
-        setWorkspaceWidth(clampNumber(saved.width, 380, 620));
-      }
-    } catch {
-      /* panel preferences are optional */
-    }
-  }, []);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(
-        "a2a:workspace-panel",
-        JSON.stringify({ open: workspaceOpen, width: workspaceWidth }),
-      );
-    } catch {
-      /* panel preferences are optional */
-    }
-  }, [workspaceOpen, workspaceWidth]);
-
-  useEffect(() => {
-    function onMove(e: PointerEvent) {
-      const current = resizeRef.current;
-      if (!current) return;
-      const next = current.startWidth - (e.clientX - current.startX);
-      setWorkspaceWidth(clampNumber(next, 380, 620));
-    }
-    function onUp() {
-      if (!resizeRef.current) return;
-      resizeRef.current = null;
-      setIsWorkspaceResizing(false);
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-    }
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
-    };
-  }, []);
 
   return (
-    <div className="h-full flex flex-col panel-float overflow-hidden bg-[color:var(--color-paper)]">
+    <div className="relative h-full flex flex-col panel-float overflow-hidden bg-[color:var(--color-paper)]">
       <header className="relative z-20 flex items-center justify-between px-5 py-3 border-b border-[color:var(--color-line)] bg-[color:var(--color-paper-strong)]/95">
         <div className="min-w-0 flex items-center gap-3">
           {conv.type === "direct" ? (
@@ -332,11 +280,11 @@ export function ConversationView({
             only (workspace, tasks, handoff, members, more). */}
         <div className="flex items-center gap-0.5">
           <Link
-            href={
+            href={`/app?rail=files&conversation=${encodeURIComponent(conv.id)}${
               primaryWorkspaceId
-                ? `/app/c/${conv.id}/workspace/${primaryWorkspaceId}`
-                : `/app/c/${conv.id}/workspace`
-            }
+                ? `&workspace=${encodeURIComponent(primaryWorkspaceId)}`
+                : ""
+            }`}
             className={HEADER_BTN}
             aria-label="Shared files"
             title={
@@ -396,6 +344,17 @@ export function ConversationView({
             >
               <HdrIcon name="members" />
               {members.length > 0 ? <HdrBadge n={members.length} tint="neutral" /> : null}
+            </button>
+          ) : null}
+          {conv.type === "group" ? (
+            <button
+              type="button"
+              onClick={() => setShowMembers(true)}
+              className={HEADER_BTN}
+              aria-label="Add to this room"
+              title="Invite a collaborator or add one of your assistants"
+            >
+              <HdrIcon name="add" />
             </button>
           ) : null}
           <div className="relative">
@@ -550,120 +509,17 @@ export function ConversationView({
       ) : null}
 
       <div className="flex-1 min-h-0 flex bg-[linear-gradient(180deg,#fff_0%,#fbfbfc_100%)]">
-        <div className="flex-1 min-w-0 flex flex-col">
-          <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-4 sm:px-6 py-5">
-            <div className="max-w-4xl mx-auto space-y-1">
-              {handoffs.length > 0 ? (
-                <HandoffStrip
-                  handoffs={handoffs}
-                  myUserId={myUserId}
-                  memberById={memberById}
-                  respondAction={actions.respondHandoff}
-                  withdrawAction={actions.withdrawHandoff}
-                  completeAction={actions.completeHandoff}
-                />
-              ) : null}
-              {messages.length === 0 ? (
-                <EmptyState
-                  memberCount={members.length}
-                  canHandoff={handoffPeers.length > 0}
-                  onOpenHandoff={() => setShowHandoff(true)}
-                />
-              ) : (
-                renderWithDateDividers(
-                  messages,
-                  memberById,
-                  myAgentId,
-                  reactionsByMessageId,
-                  setReplyTo,
-                  setEditing,
-                  actions,
-                  conv.id,
-                  memberHandles,
-                  forwardTargets,
-                  setLightboxImage,
-                )
-              )}
-              {typing.length > 0 ? <TypingRow agents={typing} /> : null}
-              {recentFailures.length > 0 ? (
-                <FailedRepliesRow
-                  failures={recentFailures}
-                  memberById={memberById}
-                />
-              ) : null}
-            </div>
-          </div>
-
-          <Composer
-            conv={conv}
-            myAgent={myAgent}
-            members={members}
-            send={actions.send}
-            showThinking={showThinking}
-            onToggleThinking={() => setShowThinking((v) => !v)}
-            replyTo={replyTo}
-            onClearReplyTo={() => setReplyTo(null)}
-            editing={editing}
-            onClearEditing={() => setEditing(null)}
-            editAction={actions.edit}
-            memberById={memberById}
-            error={error}
-          />
-        </div>
-
-        {workspaceOpen ? (
-          <>
-            <button
-              type="button"
-              aria-label="Resize workspace panel"
-              title="Drag to resize workspace"
-              onPointerDown={(e) => {
-                resizeRef.current = {
-                  pointerId: e.pointerId,
-                  startX: e.clientX,
-                  startWidth: workspaceWidth,
-                };
-                e.currentTarget.setPointerCapture(e.pointerId);
-                setIsWorkspaceResizing(true);
-                document.body.style.cursor = "col-resize";
-                document.body.style.userSelect = "none";
-              }}
-              className={
-                "hidden min-[1180px]:flex w-3 shrink-0 cursor-col-resize items-center justify-center bg-transparent transition-colors " +
-                (isWorkspaceResizing
-                  ? "bg-[color:var(--color-tint-violet)]/45"
-                  : "hover:bg-[color:var(--color-tint-violet)]/35")
-              }
-            >
-              <span className="h-12 w-1 rounded-full bg-[color:var(--color-line-strong)]/70" />
-            </button>
-            <WorkspaceStatusRail
-              convId={conv.id}
-              workspace={primaryWorkspace}
-              files={workspaceFiles}
-              tasks={tasks}
-              members={members}
-              connectedPairs={connectedPairs}
-              liveHandoff={liveHandoff}
-              openTaskCount={openTaskCount}
-              primaryWorkspaceId={primaryWorkspaceId}
-              width={workspaceWidth}
-              onHide={() => setWorkspaceOpen(false)}
-            />
-          </>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setWorkspaceOpen(true)}
-            className="hidden min-[1180px]:flex w-10 shrink-0 items-center justify-center border-l border-[color:var(--color-line)] bg-[color:var(--color-paper-strong)] text-[color:var(--color-ink-soft)] hover:text-[color:var(--color-ink)] hover:bg-[color:var(--color-paper-faint)] transition-colors"
-            title="Show workspace"
-            aria-label="Show workspace"
-          >
-            <span className="rotate-90 text-[11px] uppercase tracking-[0.12em] font-semibold">
-              Workspace
-            </span>
-          </button>
-        )}
+        <WorkspaceStatusRail
+          convId={conv.id}
+          workspace={primaryWorkspace}
+          files={workspaceFiles}
+          tasks={tasks}
+          members={members}
+          connectedPairs={connectedPairs}
+          liveHandoff={liveHandoff}
+          openTaskCount={openTaskCount}
+          primaryWorkspaceId={primaryWorkspaceId}
+        />
       </div>
 
       <ImageLightbox
@@ -672,6 +528,114 @@ export function ConversationView({
       />
     </div>
   );
+}
+
+function ExecutionStack({
+  files,
+  tasks,
+  liveHandoff,
+  typingCount,
+  recentFailureCount,
+  connectedPairs,
+}: {
+  files: WorkspaceFile[];
+  tasks: Task[];
+  liveHandoff: HandoffCardData | null;
+  typingCount: number;
+  recentFailureCount: number;
+  connectedPairs: number;
+}) {
+  const openTaskCount = tasks.filter(
+    (task) => task.status !== "done" && task.status !== "cancelled",
+  ).length;
+  const rows = [
+    {
+      tool: "workspace.read",
+      target: files.length ? `${files.length} files indexed` : "no files yet",
+      latency: files.length ? "live" : "idle",
+      status: files.length ? "Done" : "Waiting",
+      tone: files.length ? "green" : "neutral",
+    },
+    {
+      tool: "task.queue",
+      target: openTaskCount ? `${openTaskCount} open tasks` : "no open tasks",
+      latency: tasks.length ? "synced" : "idle",
+      status: openTaskCount ? "Active" : "Done",
+      tone: openTaskCount ? "amber" : "green",
+    },
+    {
+      tool: "handoff.scope",
+      target: liveHandoff?.title ?? (connectedPairs ? `${connectedPairs} linked agents` : "manual approval"),
+      latency: liveHandoff ? handoffStatusLabel(liveHandoff.status) : "quiet",
+      status: liveHandoff ? "Review" : "Ready",
+      tone: liveHandoff ? "amber" : "violet",
+    },
+    {
+      tool: "agent.reply",
+      target:
+        recentFailureCount > 0
+          ? `${recentFailureCount} failed reply ${recentFailureCount === 1 ? "job" : "jobs"}`
+          : typingCount > 0
+            ? `${typingCount} assistant${typingCount === 1 ? "" : "s"} typing`
+            : "message stream stable",
+      latency: typingCount > 0 ? "streaming" : "now",
+      status: recentFailureCount > 0 ? "Needs review" : typingCount > 0 ? "Running" : "Ready",
+      tone: recentFailureCount > 0 ? "danger" : typingCount > 0 ? "blue" : "green",
+    },
+  ] as const;
+
+  return (
+    <section className="shrink-0 border-b border-[color:var(--color-line)] bg-[color:var(--color-paper-strong)] px-4 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.12em] font-semibold text-[color:var(--color-ink-soft)]">
+            Agent execution
+          </div>
+          <div className="mt-1 text-[13px] font-semibold text-[color:var(--color-ink)]">
+            Latest workspace activity
+          </div>
+        </div>
+        <span className="tag tag-violet !text-[10px] !py-0.5">
+          visible
+        </span>
+      </div>
+      <div className="mt-3 space-y-2">
+        {rows.map((row) => (
+          <div
+            key={row.tool}
+            className="rounded-xl border border-[color:var(--color-line)] bg-[color:var(--color-paper)] px-3 py-2 shadow-[0_10px_24px_-22px_rgba(22,22,40,.45)]"
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="grid h-6 w-6 shrink-0 place-items-center rounded-lg bg-[color:var(--color-paper-faint)] text-[color:var(--color-ink-soft)]">
+                <HdrIcon name="search" />
+              </span>
+              <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-[color:var(--color-ink)]">
+                {row.tool}
+              </span>
+              <span className="text-[11px] text-[color:var(--color-ink-soft)]">
+                {row.latency}
+              </span>
+              <span className={executionTagClass(row.tone)}>{row.status}</span>
+            </div>
+            <div className="mt-1.5 truncate pl-8 text-[12px] text-[color:var(--color-ink-muted)]">
+              {row.target}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function executionTagClass(
+  tone: "neutral" | "violet" | "green" | "amber" | "blue" | "danger",
+) {
+  if (tone === "green") return "tag tag-green !text-[10px] !py-0.5";
+  if (tone === "amber") return "tag tag-amber !text-[10px] !py-0.5";
+  if (tone === "blue") return "tag tag-blue !text-[10px] !py-0.5";
+  if (tone === "violet") return "tag tag-violet !text-[10px] !py-0.5";
+  if (tone === "danger") return "tag !text-[10px] !py-0.5 text-[color:var(--color-danger)]";
+  return "tag !text-[10px] !py-0.5";
 }
 
 function WorkspaceStatusRail({
@@ -684,7 +648,6 @@ function WorkspaceStatusRail({
   liveHandoff,
   openTaskCount,
   primaryWorkspaceId,
-  width,
   onHide,
 }: {
   convId: string;
@@ -696,35 +659,37 @@ function WorkspaceStatusRail({
   liveHandoff: HandoffCardData | null;
   openTaskCount: number;
   primaryWorkspaceId: string | null;
-  width: number;
-  onHide: () => void;
+  onHide?: () => void;
 }) {
   const openTasks = tasks.filter(
     (t) => t.status !== "done" && t.status !== "cancelled",
   );
   const visibleTasks = openTasks.length > 0 ? openTasks : tasks;
+  const searchParams = useSearchParams();
+  const previewPath = searchParams.get("previewFile");
+  const demoProfile = getDemoWorkspaceProfile(convId);
+  const demoItems = getDemoWorkspaceItems(convId);
   const workspaceHref = primaryWorkspaceId
-    ? `/app/c/${convId}/workspace/${primaryWorkspaceId}`
-    : `/app/c/${convId}/workspace`;
-  const selectedFile =
-    files.find((f) => f.path.endsWith(".csv")) ??
-    files.find((f) => f.path.endsWith(".md")) ??
-    files[0] ??
-    null;
-  const [selectedPath, setSelectedPath] = useState<string | null>(
-    selectedFile?.path ?? null,
-  );
-  const [fileQuery, setFileQuery] = useState("");
-  const activeFile =
-    files.find((f) => f.path === selectedPath) ?? selectedFile ?? null;
-  const treeFiles = useMemo(() => {
-    const q = fileQuery.trim().toLowerCase();
-    return q ? files.filter((file) => file.path.toLowerCase().includes(q)) : files;
-  }, [fileQuery, files]);
-  const fileTree = useMemo(() => buildWorkspaceTree(treeFiles), [treeFiles]);
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(
-    () => new Set(files.map((file) => file.path.split("/")[0]).filter(Boolean)),
-  );
+    ? `/app?rail=files&conversation=${encodeURIComponent(
+        convId,
+      )}&workspace=${encodeURIComponent(primaryWorkspaceId)}`
+    : `/app?rail=files&conversation=${encodeURIComponent(convId)}`;
+  const actualFile = previewPath
+    ? files.find((f) => f.path === previewPath) ?? null
+    : null;
+  const demoFile = previewPath && !actualFile ? getDemoWorkspaceFile(previewPath, convId) : null;
+  const activeFile: WorkspaceFile | null = useMemo(() => {
+    if (actualFile) return actualFile;
+    if (!demoFile) return null;
+    return {
+      snapshot_id: "demo",
+      path: demoFile.path,
+      content_sha256: "demo",
+      size_bytes: new TextEncoder().encode(demoFile.content ?? "").length,
+    };
+  }, [actualFile, demoFile]);
+  const demoFileCount = demoItems.filter((item) => item.kind !== "folder").length;
+  const displayedFileCount = files.length || demoFileCount;
   const [fileState, setFileState] = useState<{
     path: string;
     loading: boolean;
@@ -743,10 +708,17 @@ function WorkspaceStatusRail({
   });
 
   useEffect(() => {
-    if (!selectedPath && selectedFile) setSelectedPath(selectedFile.path);
-  }, [selectedPath, selectedFile]);
-
-  useEffect(() => {
+    if (demoFile && activeFile) {
+      setFileState({
+        path: activeFile.path,
+        loading: false,
+        error: null,
+        content: demoFile.content ?? "",
+        kind: workspacePreviewKind(activeFile.path),
+        mime: workspaceFileMime(activeFile.path),
+      });
+      return;
+    }
     if (!activeFile || !workspace) {
       setFileState({
         path: "",
@@ -864,134 +836,66 @@ function WorkspaceStatusRail({
       controller.abort();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [activeFile, workspace]);
-
-  function toggleFolder(path: string) {
-    setExpandedFolders((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      return next;
-    });
-  }
+  }, [activeFile, demoFile, workspace]);
 
   return (
-    <aside
-      className="hidden min-[1180px]:flex shrink-0 flex-col border-l border-[color:var(--color-line)] bg-[color:var(--color-paper-strong)] overflow-hidden"
-      style={{ width }}
-    >
+    <aside className="flex flex-1 min-w-0 flex-col bg-[color:var(--color-paper-strong)] overflow-hidden">
       <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-[color:var(--color-line)]">
         <div className="min-w-0">
           <div className="text-[10px] uppercase tracking-[0.12em] font-semibold text-[color:var(--color-ink-soft)]">
             Workspace
           </div>
           <h3 className="mt-1 text-[15px] font-semibold tracking-tight truncate">
-            {workspace?.name ?? "Shared files"}
+            {workspace?.name ?? demoProfile.title}
           </h3>
         </div>
         <div className="flex items-center gap-1.5">
           <Link href={workspaceHref} className="btn btn-secondary btn-sm">
             Full view
           </Link>
-          <button
-            type="button"
-            onClick={onHide}
-            className="w-8 h-8 rounded-lg inline-flex items-center justify-center text-[color:var(--color-ink-soft)] hover:text-[color:var(--color-ink)] hover:bg-[color:var(--color-hover)]"
-            title="Hide workspace"
-            aria-label="Hide workspace"
-          >
-            ×
-          </button>
+          {onHide ? (
+            <button
+              type="button"
+              onClick={onHide}
+              className="w-8 h-8 rounded-lg inline-flex items-center justify-center text-[color:var(--color-ink-soft)] hover:text-[color:var(--color-ink)] hover:bg-[color:var(--color-hover)]"
+              title="Hide workspace"
+              aria-label="Hide workspace"
+            >
+              ×
+            </button>
+          ) : null}
         </div>
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="px-4 py-3 grid grid-cols-3 gap-2 border-b border-[color:var(--color-line)]">
-          <MiniMetric label="Files" value={String(files.length)} />
+          <MiniMetric label="Files" value={String(displayedFileCount)} />
           <MiniMetric label="Tasks" value={String(openTaskCount)} tone="amber" />
           <MiniMetric
             label="Scope"
-            value={connectedPairs > 0 ? `${connectedPairs} linked` : "manual"}
+            value={connectedPairs > 0 ? `${connectedPairs} linked` : demoProfile.id}
             tone={connectedPairs > 0 ? "green" : "violet"}
           />
         </div>
 
         <section className="p-4">
-          <div className="rounded-[22px] border border-[color:var(--color-line)] bg-[color:var(--color-paper)] overflow-hidden shadow-[0_16px_44px_-36px_rgba(22,22,40,.5)]">
-            <div className="flex items-center justify-between gap-2 px-3.5 py-3 border-b border-[color:var(--color-line)]">
-              <div className="min-w-0">
-                <div className="text-[10px] uppercase tracking-[0.12em] font-semibold text-[color:var(--color-ink-soft)]">
-                  Preview
-                </div>
-                <div className="mt-0.5 text-[13px] font-semibold truncate">
-                  {activeFile?.path ?? "No file selected"}
-                </div>
-              </div>
-              <span className="tag tag-violet !text-[10px] !py-0.5">
-                {workspace ? "live" : "empty"}
-              </span>
-            </div>
-
-            <div className="grid grid-cols-[minmax(132px,38%)_minmax(0,1fr)] min-h-[330px]">
-              <div className="border-r border-[color:var(--color-line)] bg-[color:var(--color-paper-faint)]/60 px-2 py-2">
-                <div className="flex items-center justify-between gap-2 px-1.5 py-1">
-                  <div className="text-[10px] uppercase tracking-[0.12em] font-semibold text-[color:var(--color-ink-soft)]">
-                    Project
-                  </div>
-                  <span className="text-[10px] font-medium text-[color:var(--color-ink-soft)]">
-                    {files.length}
-                  </span>
-                </div>
-                <label className="sr-only" htmlFor="workspace-file-filter">
-                  Filter workspace files
-                </label>
-                <input
-                  id="workspace-file-filter"
-                  value={fileQuery}
-                  onChange={(e) => setFileQuery(e.target.value)}
-                  placeholder="Find file"
-                  className="mt-1 w-full rounded-lg border border-[color:var(--color-line)] bg-white/80 px-2 py-1.5 text-[11px] outline-none focus:border-[color:var(--color-ink-soft)]"
-                />
-                <div className="mt-1 space-y-0.5">
-                  <WorkspaceFileTree
-                    nodes={fileTree.children}
-                    activePath={activeFile?.path ?? null}
-                    expandedFolders={expandedFolders}
-                    forceOpen={fileQuery.trim().length > 0}
-                    onToggleFolder={toggleFolder}
-                    onSelectFile={setSelectedPath}
-                  />
-                  {treeFiles.length === 0 && fileQuery.trim() ? (
-                    <div className="px-1.5 py-3 text-[12px] text-[color:var(--color-ink-soft)]">
-                      No files match.
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-
-              <div className="min-w-0 p-3.5">
-                {activeFile ? (
-                  <FilePreview
-                    key={activeFile.path}
-                    file={activeFile}
-                    state={fileState}
-                    downloadHref={
-                      workspace
-                        ? `/api/v1/workspaces/${workspace.id}/files/${activeFile.path
-                            .split("/")
-                            .map(encodeURIComponent)
-                            .join("/")}?download=1`
-                        : undefined
-                    }
-                  />
-                ) : (
-                  <div className="h-full min-h-[220px] flex items-center justify-center text-center text-[12px] text-[color:var(--color-ink-muted)]">
-                    Shared workspace artifacts will appear here.
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
+          {activeFile ? (
+            <FilePreview
+              key={activeFile.path}
+              file={activeFile}
+              state={fileState}
+              downloadHref={
+                workspace && actualFile
+                  ? `/api/v1/workspaces/${workspace.id}/files/${activeFile.path
+                      .split("/")
+                      .map(encodeURIComponent)
+                      .join("/")}?download=1`
+                  : undefined
+              }
+            />
+          ) : (
+            <WorkspaceOverviewPreview />
+          )}
         </section>
 
         <div className="px-4 pb-4 grid grid-cols-1 2xl:grid-cols-2 gap-3">
@@ -1003,18 +907,20 @@ function WorkspaceStatusRail({
               <span className="tag tag-violet !text-[10px] !py-0.5">shared</span>
             </div>
             <div className="mt-2 flex -space-x-2">
-              {members.slice(0, 7).map((m) => (
-                <div
-                  key={m.id}
-                  className="rounded-full ring-2 ring-white"
-                  title={m.id}
-                >
-                  <Avatar agent={m} size={28} />
+              {(workspace ? members.map((m) => ({ id: m.id, label: "", agent: m })) : demoProfile.members.map((m) => ({ id: m.name, label: m.emoji, agent: null }))).slice(0, 7).map((m) => (
+                <div key={m.id} className="rounded-full ring-2 ring-white" title={m.id}>
+                  {m.agent ? (
+                    <Avatar agent={m.agent} size={28} />
+                  ) : (
+                    <span className="grid h-7 w-7 place-items-center rounded-full bg-[color:var(--color-paper-faint)] text-[9px] font-semibold text-[color:var(--color-ink)] ring-1 ring-[color:var(--color-line)]">
+                      {m.label}
+                    </span>
+                  )}
                 </div>
               ))}
             </div>
             <div className="mt-3 space-y-1.5">
-              <StatusRow label="Assistants" value={`${members.length} in room`} />
+              <StatusRow label="Members" value={`${workspace ? members.length : demoProfile.members.length} in room`} />
               <StatusRow
                 label="Connections"
                 value={connectedPairs > 0 ? `${connectedPairs} linked` : "manual only"}
@@ -1223,6 +1129,106 @@ function MiniMetric({
   );
 }
 
+function WorkspaceOverviewPreview() {
+  const steps = [
+    ["Create partner profile", "Confirm company, owner, and launch scope"],
+    ["Share onboarding files", "Upload checklist, agreement, and copy deck"],
+    ["Invite partner agent", "Assign review and implementation tasks"],
+    ["Approve launch", "Close review after tests and preview pass"],
+  ];
+  return (
+    <div className="mx-auto max-w-[760px] overflow-hidden rounded-2xl border border-[color:var(--color-line)] bg-white shadow-[0_18px_48px_-38px_rgba(22,22,40,.45)]">
+      <div className="flex items-center justify-between gap-3 border-b border-[color:var(--color-line)] px-5 py-4">
+        <div className="flex items-center gap-2">
+          <span className="grid h-8 w-8 place-items-center rounded-lg bg-[color:var(--color-tint-blue-ink)] text-white">
+            <HdrIcon name="layers" />
+          </span>
+          <span className="text-[15px] font-semibold">
+            Agent2Agent{" "}
+            <span className="text-[color:var(--color-tint-blue-ink)]">
+              Partner
+            </span>
+          </span>
+        </div>
+        <nav className="hidden items-center gap-7 text-[12px] text-[color:var(--color-ink-muted)] md:flex">
+          <span>Workspace</span>
+          <span>Tasks</span>
+          <span>Agents</span>
+          <span>Reviews</span>
+        </nav>
+        <button type="button" className="btn btn-primary btn-sm">
+          Open workspace
+        </button>
+      </div>
+      <section className="px-6 pb-5 pt-8 text-center">
+        <span className="inline-flex rounded-full bg-[#eef4ff] px-4 py-2 text-[12px] font-medium text-[color:var(--color-tint-blue-ink)]">
+          Partner onboarding workspace
+        </span>
+        <h2 className="mx-auto mt-5 max-w-[560px] text-[34px] font-semibold leading-[1.12] tracking-tight text-[#101729]">
+          Launch Partner Access
+          <br />
+          With Human and Agent Review
+        </h2>
+        <p className="mx-auto mt-3 max-w-[520px] text-[14px] leading-relaxed text-[color:var(--color-ink-muted)]">
+          A shared room where the partner team, your agent, and their agent can
+          review files, approve terms, and ship the launch checklist together.
+        </p>
+        <div className="mt-6 flex justify-center gap-3">
+          <button type="button" className="btn btn-primary btn-lg">
+            Start review
+          </button>
+          <button type="button" className="btn btn-secondary btn-lg">
+            View contacts
+          </button>
+        </div>
+      </section>
+      <section className="mx-5 mb-4 rounded-2xl border border-[color:var(--color-line)] px-5 py-3.5">
+        <h3 className="text-[14px] font-semibold">Getting started</h3>
+        <div className="mt-3 grid grid-cols-4 gap-3">
+          {steps.map(([title, body], index) => (
+            <div key={title} className="min-w-0">
+              <div className="mb-3 flex items-center gap-2">
+                <span
+                  className={
+                    "grid h-5 w-5 place-items-center rounded-full text-[11px] font-semibold " +
+                    (index === 0
+                      ? "bg-[color:var(--color-tint-blue-ink)] text-white"
+                      : "bg-[color:var(--color-line-strong)] text-white")
+                  }
+                >
+                  {index + 1}
+                </span>
+                <span className="h-px flex-1 bg-[color:var(--color-line)]" />
+              </div>
+              <div className="text-[12px] font-semibold">{title}</div>
+              <p className="mt-1 text-[10.5px] leading-snug text-[color:var(--color-ink-muted)]">
+                {body}
+              </p>
+            </div>
+          ))}
+        </div>
+        <section className="mt-4 rounded-xl border border-[color:var(--color-line)] px-4 py-2.5">
+          <h3 className="text-[13px] font-semibold">Consent status</h3>
+          <div className="mt-2 flex items-center gap-3">
+            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-xl bg-[color:var(--color-tint-green)] text-[color:var(--color-tint-green-ink)]">
+              ✓
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="text-[12px] font-semibold">All terms approved</div>
+              <div className="truncate text-[10.5px] text-[color:var(--color-ink-muted)]">
+                Partner agreement, workspace access, and launch copy are approved.
+              </div>
+            </div>
+            <button type="button" className="btn btn-secondary btn-sm">
+              View details
+            </button>
+          </div>
+        </section>
+      </section>
+    </div>
+  );
+}
+
 function FilePreview({
   file,
   state,
@@ -1244,7 +1250,7 @@ function FilePreview({
 }) {
   if (state.loading) {
     return (
-      <div>
+      <div className="min-h-[620px] rounded-2xl border border-[color:var(--color-line)] bg-white p-4">
         <FileHeader file={file} state={state} downloadHref={downloadHref} />
         <div className="mt-3 space-y-2">
           <div className="skeleton-line h-8 w-full" />
@@ -1257,7 +1263,7 @@ function FilePreview({
 
   if (state.error) {
     return (
-      <div>
+      <div className="min-h-[620px] rounded-2xl border border-[color:var(--color-line)] bg-white p-4">
         <FileHeader file={file} state={state} downloadHref={downloadHref} />
         <div className="mt-3 rounded-xl border border-[color:var(--color-danger)]/20 bg-[color:var(--color-danger-tint)]/60 px-3 py-3 text-[12px] text-[color:var(--color-danger)]">
           {state.error}
@@ -1271,14 +1277,14 @@ function FilePreview({
 
   if (kind === "image") {
     return (
-      <div>
+      <div className="min-h-[620px] rounded-2xl border border-[color:var(--color-line)] bg-white p-4">
         <FileHeader file={file} state={state} downloadHref={downloadHref} />
         <div className="mt-3 rounded-xl border border-[color:var(--color-line)] bg-[color:var(--color-paper-faint)] p-2">
           {state.objectUrl ? (
             <img
               src={state.objectUrl}
               alt={file.path}
-              className="max-h-[280px] w-full rounded-lg object-contain bg-white"
+              className="max-h-[70vh] w-full rounded-lg object-contain bg-white"
             />
           ) : (
             <div className="h-[180px] rounded-lg bg-white grid place-items-center text-[12px] text-[color:var(--color-ink-soft)]">
@@ -1292,14 +1298,14 @@ function FilePreview({
 
   if (kind === "pdf") {
     return (
-      <div>
+      <div className="min-h-[620px] rounded-2xl border border-[color:var(--color-line)] bg-white p-4">
         <FileHeader file={file} state={state} downloadHref={downloadHref} />
         <div className="mt-3 overflow-hidden rounded-xl border border-[color:var(--color-line)] bg-white">
           {state.objectUrl ? (
             <object
               data={state.objectUrl}
               type="application/pdf"
-              className="h-[280px] w-full"
+              className="h-[70vh] min-h-[560px] w-full"
             >
               <div className="p-4 text-[12px] text-[color:var(--color-ink-muted)]">
                 PDF preview is not available in this browser.
@@ -1315,9 +1321,23 @@ function FilePreview({
     );
   }
 
+  if (kind === "text" && file.path.toLowerCase().endsWith(".html")) {
+    return (
+      <div className="flex min-h-[620px] flex-col overflow-hidden rounded-2xl border border-[color:var(--color-line)] bg-white">
+        <FileHeader file={file} state={state} downloadHref={downloadHref} />
+        <iframe
+          title={file.path}
+          srcDoc={content || "<!doctype html><html><body></body></html>"}
+          sandbox=""
+          className="h-[70vh] min-h-[560px] w-full border-0 bg-white"
+        />
+      </div>
+    );
+  }
+
   if (kind === "binary") {
     return (
-      <div>
+      <div className="min-h-[620px] rounded-2xl border border-[color:var(--color-line)] bg-white p-4">
         <FileHeader file={file} state={state} downloadHref={downloadHref} />
         <div className="mt-3 rounded-xl border border-[color:var(--color-line)] bg-[color:var(--color-paper-faint)] px-3 py-4">
           <div className="text-[12.5px] font-medium text-[color:var(--color-ink)]">
@@ -1333,69 +1353,12 @@ function FilePreview({
     );
   }
 
-  if (kind === "csv") {
-    const csv = parseCsvPreview(content);
-    return (
-      <div>
-        <FileHeader file={file} state={state} downloadHref={downloadHref} />
-        <div className="mt-3 max-h-[270px] overflow-auto rounded-xl border border-[color:var(--color-line)] bg-white">
-          <table className="w-full min-w-[360px] text-[11px]">
-            <thead className="bg-[color:var(--color-paper-faint)] text-[color:var(--color-ink-muted)]">
-              <tr>
-                {csv.header.map((h, i) => (
-                  <th
-                    key={i}
-                    className="sticky top-0 z-10 bg-[color:var(--color-paper-faint)] text-left font-medium px-2 py-2 whitespace-nowrap"
-                  >
-                    {h || `column ${i + 1}`}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[color:var(--color-line)]">
-              {csv.rows.map((row, ri) => (
-                <tr key={ri}>
-                  {row.map((cell, ci) => (
-                    <td
-                      key={ci}
-                      className={
-                        "px-2 py-2 truncate " +
-                        (looksPositiveDelta(cell)
-                          ? "text-[color:var(--color-tint-green-ink)]"
-                          : looksNegativeDelta(cell)
-                            ? "text-[color:var(--color-danger)]"
-                            : "")
-                      }
-                    >
-                      {cell}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {csv.truncated ? (
-            <div className="px-2 py-1.5 text-[10px] text-[color:var(--color-ink-soft)] border-t border-[color:var(--color-line)]">
-              Showing first {csv.rows.length} rows.
-            </div>
-          ) : null}
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div>
+    <div className="flex min-h-[620px] flex-col overflow-hidden rounded-2xl border border-[color:var(--color-line)] bg-white">
       <FileHeader file={file} state={state} downloadHref={downloadHref} />
-      {kind === "markdown" ? (
-        <div className="mt-3 max-h-[270px] overflow-y-auto rounded-xl border border-[color:var(--color-line)] bg-white px-3 py-3 text-[12.5px] leading-[1.7]">
-          <MessageMarkdown text={content || "_Empty file_"} memberHandles={[]} />
-        </div>
-      ) : (
-        <pre className="mt-3 max-h-[270px] overflow-auto rounded-xl border border-[color:var(--color-line)] bg-[color:var(--color-paper-faint)] p-3 font-mono text-[11px] leading-relaxed text-[color:var(--color-ink-muted)] whitespace-pre-wrap">
-          {content || "Empty file"}
-        </pre>
-      )}
+      <pre className="flex-1 overflow-auto bg-[#fbfbfc] p-4 font-mono text-[12px] leading-relaxed text-[color:var(--color-ink)] whitespace-pre-wrap">
+        {content || "Empty file"}
+      </pre>
     </div>
   );
 }
@@ -1410,7 +1373,7 @@ function FileHeader({
   downloadHref?: string;
 }) {
   return (
-    <div className="flex items-start justify-between gap-3">
+    <div className="flex items-start justify-between gap-3 border-b border-[color:var(--color-line)] bg-white px-4 py-3">
       <div className="min-w-0">
         <div className="text-[13px] font-semibold truncate">{fName(file.path)}</div>
         <div className="mt-0.5 text-[11px] text-[color:var(--color-ink-soft)] truncate">
@@ -1613,10 +1576,6 @@ function fileExt(path: string): string {
 
 function fName(path: string): string {
   return path.split("/").pop() ?? path;
-}
-
-function clampNumber(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
 }
 
 function parseCsvPreview(text: string): {
@@ -1894,105 +1853,153 @@ function MemberManagerBar({
   // Partition members into mine vs theirs for the interconnect grid.
   const myMembers = members.filter((m) => m.owner_user_id === myUserId);
   const theirMembers = members.filter((m) => m.owner_user_id !== myUserId);
+  const owner = members.find((m) => m.id === ownerId);
+  const userIsOwner = owner?.owner_user_id === myUserId;
   const linkBetween = (a: string, b: string): AgentLinkRow | null => {
     const [x, y] = a < b ? [a, b] : [b, a];
     return (
       agentLinks.find((l) => l.agent_a === x && l.agent_b === y) ?? null
     );
   };
+  const memberRow = (m: Agent) => {
+    const isMyAgent = m.owner_user_id === myUserId;
+    const canRemove =
+      (m.id !== ownerId && userIsOwner) ||
+      (m.id !== ownerId && isMyAgent);
+    return (
+      <li
+        key={m.id}
+        className="flex items-center gap-2 px-2 py-2 rounded-xl hover:bg-[color:var(--color-hover)]"
+      >
+        <Avatar agent={m} size={30} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="text-[13px] font-medium truncate">
+              {m.display_name}
+            </span>
+            {m.id === ownerId ? <span className="tag tag-amber">owner</span> : null}
+            {isMyAgent && m.id !== ownerId ? <span className="tag tag-blue">mine</span> : null}
+          </div>
+          <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-[color:var(--color-ink-soft)]">
+            <code className="font-mono truncate">{m.id}</code>
+            <span>·</span>
+            <span>
+              {m.agent_kind === "managed"
+                ? "hosted"
+                : m.last_seen_at
+                  ? `online ${timeAgo(m.last_seen_at)}`
+                  : "not connected"}
+            </span>
+          </div>
+        </div>
+        {canRemove ? (
+          <form action={removeAction} className="shrink-0">
+            <input type="hidden" name="conversation_id" value={convId} />
+            <input type="hidden" name="agent_id" value={m.id} />
+            <button
+              type="submit"
+              title={isMyAgent ? "Remove my assistant" : "Remove from room"}
+              className="w-7 h-7 rounded-lg text-[color:var(--color-ink-soft)] hover:bg-[color:var(--color-danger-tint)] hover:text-[color:var(--color-danger)]"
+            >
+              <span className="sr-only">Remove</span>
+              <span aria-hidden>×</span>
+            </button>
+          </form>
+        ) : null}
+      </li>
+    );
+  };
   return (
-    <div className="bg-[color:var(--color-tint-violet)]/40 border-b border-[color:var(--color-line)] px-5 py-3">
-      <div className="max-w-5xl mx-auto">
-        <div className="flex items-center justify-between mb-2">
-          <span className="font-medium text-sm">Members ({members.length})</span>
+    <div className="absolute right-4 top-[58px] z-40 w-[min(460px,calc(100%-2rem))] surface shadow-[var(--shadow-pop)] overflow-hidden">
+      <div className="px-4 py-3 border-b border-[color:var(--color-line)] bg-[color:var(--color-paper-strong)]">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="font-semibold text-sm">Members in this room</div>
+            <p className="mt-0.5 text-[12px] text-[color:var(--color-ink-soft)]">
+              Presence is separate from scoped grants and workspace writes.
+            </p>
+          </div>
           <button
             type="button"
             onClick={onClose}
-            className="btn btn-ghost btn-sm"
+            className="btn btn-ghost btn-sm shrink-0"
           >
             Close
           </button>
         </div>
-        <ul className="flex flex-wrap gap-1.5 mb-3">
-          {members.map((m) => {
-            const isMyAgent = m.owner_user_id === myUserId;
-            // ✕ button: show only when the caller is allowed to remove this
-            // row — either the group owner, or the row IS the caller's own
-            // agent (self-leave). Hide otherwise so non-owners don't see a
-            // button that would always 403 server-side.
-            const canRemove =
-              (m.id !== ownerId && /* never delete the owner via this UI */
-                (members.find((mm) => mm.id === ownerId)?.owner_user_id ===
-                  myUserId)) ||
-              isMyAgent;
-            return (
-              <li
-                key={m.id}
-                className="inline-flex items-center gap-1.5 surface px-2 py-1 text-xs"
-              >
-                <span>{m.avatar_emoji}</span>
-                <span className="font-mono">{m.id}</span>
-                {m.id === ownerId ? (
-                  <span className="tag tag-amber">owner</span>
-                ) : null}
-                {isMyAgent && m.id !== ownerId ? (
-                  <span className="tag tag-blue">mine</span>
-                ) : null}
-                {canRemove && m.id !== ownerId ? (
-                  <form action={removeAction} className="contents">
-                    <input type="hidden" name="conversation_id" value={convId} />
-                    <input type="hidden" name="agent_id" value={m.id} />
-                    <button
-                      type="submit"
-                      title={isMyAgent ? "Remove my assistant" : "Remove from group"}
-                      className="text-[color:var(--color-ink-soft)] hover:text-[color:var(--color-danger)] ml-0.5"
-                    >
-                      ✕
-                    </button>
-                  </form>
-                ) : null}
-              </li>
-            );
-          })}
-        </ul>
+      </div>
+
+      <div className="max-h-[calc(100vh-170px)] overflow-y-auto px-3 py-3">
+        <section>
+          <div className="px-2 mb-1 text-[10px] uppercase tracking-[0.08em] font-medium text-[color:var(--color-ink-soft)]">
+            My agents
+          </div>
+          <ul className="space-y-0.5">
+            {myMembers.map(memberRow)}
+          </ul>
+        </section>
+
+        {theirMembers.length > 0 ? (
+          <section className="mt-3">
+            <div className="px-2 mb-1 text-[10px] uppercase tracking-[0.08em] font-medium text-[color:var(--color-ink-soft)]">
+              Collaborators
+            </div>
+            <ul className="space-y-0.5">
+              {theirMembers.map(memberRow)}
+            </ul>
+          </section>
+        ) : null}
 
         {/* v0.14: any member can add their own agents into the group */}
         {myAgentsForSelfAdd.length > 0 ? (
           <form
             action={addOwnAgentAction}
-            className="flex items-center gap-2 mb-2"
+            className="mt-4 rounded-2xl border border-[color:var(--color-line)] bg-[color:var(--color-paper-faint)] p-2"
           >
             <input type="hidden" name="conversation_id" value={convId} />
-            <select
-              name="agent_id"
-              className="input !py-1.5 !text-xs flex-1 font-mono"
-            >
-              {myAgentsForSelfAdd.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.avatar_emoji} {a.id} (mine)
-                </option>
-              ))}
-            </select>
-            <button type="submit" className="btn btn-secondary btn-sm">
-              Add my assistant
-            </button>
+            <div className="text-[12px] font-medium px-1.5 mb-1">
+              Add my agent
+            </div>
+            <div className="flex items-center gap-2">
+              <select
+                name="agent_id"
+                className="input !py-1.5 !text-xs flex-1 font-mono"
+              >
+                {myAgentsForSelfAdd.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.display_name} ({a.id})
+                  </option>
+                ))}
+              </select>
+              <button type="submit" className="btn btn-secondary btn-sm">
+                Add
+              </button>
+            </div>
           </form>
         ) : null}
 
         {/* Owner-only: invite a friend's agent */}
         {inviteCandidates.length > 0 ? (
-          <form action={addAction} className="flex items-center gap-2 mb-3">
+          <form
+            action={addAction}
+            className="mt-2 rounded-2xl border border-[color:var(--color-line)] bg-[color:var(--color-paper-faint)] p-2"
+          >
             <input type="hidden" name="conversation_id" value={convId} />
-            <select name="agent_id" className="input !py-1.5 !text-xs flex-1 font-mono">
-              {inviteCandidates.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.avatar_emoji} {a.id}
-                </option>
-              ))}
-            </select>
-            <button type="submit" className="btn btn-primary btn-sm">
-              Invite a friend's assistant
-            </button>
+            <div className="text-[12px] font-medium px-1.5 mb-1">
+              Invite collaborator
+            </div>
+            <div className="flex items-center gap-2">
+              <select name="agent_id" className="input !py-1.5 !text-xs flex-1 font-mono">
+                {inviteCandidates.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.display_name} ({a.id})
+                  </option>
+                ))}
+              </select>
+              <button type="submit" className="btn btn-primary btn-sm">
+                Invite
+              </button>
+            </div>
           </form>
         ) : null}
 
@@ -2000,9 +2007,9 @@ function MemberManagerBar({
             cross-user members. The interconnect is a social trust signal:
             both sides explicitly opt-in their agents to collab autonomously. */}
         {myMembers.length > 0 && theirMembers.length > 0 ? (
-          <div className="mt-2 border-t border-[color:var(--color-line)] pt-2">
+          <div className="mt-3 border-t border-[color:var(--color-line)] pt-3">
             <div className="text-[11px] uppercase tracking-wider text-[color:var(--color-ink-soft)] mb-1.5">
-              🔗 Assistant connections
+              Assistant connections
             </div>
             <table className="w-full text-[11px]">
               <tbody>
@@ -2025,7 +2032,7 @@ function MemberManagerBar({
                             <form action={revokeLinkAction} className="contents">
                               <input type="hidden" name="conversation_id" value={convId} />
                               <input type="hidden" name="link_id" value={link.id} />
-                              <span className="tag tag-green mr-1">🔗 connected</span>
+                              <span className="tag tag-green mr-1">connected</span>
                               <button
                                 type="submit"
                                 className="btn btn-ghost btn-sm"
@@ -2090,8 +2097,8 @@ function MemberManagerBar({
         ) : null}
 
         {inviteCandidates.length === 0 && myAgentsForSelfAdd.length === 0 ? (
-          <div className="text-xs text-[color:var(--color-ink-muted)]">
-            Everyone you could add is already in this group.
+          <div className="mt-3 rounded-2xl bg-[color:var(--color-paper-faint)] px-3 py-2 text-xs text-[color:var(--color-ink-muted)]">
+            Everyone available to you is already in this room.
           </div>
         ) : null}
       </div>
@@ -3410,6 +3417,25 @@ const HDR_ICONS: Record<string, React.ReactNode> = {
       <path d="M3.5 19c0-3 2.5-5 5.5-5s5.5 2 5.5 5" />
       <path d="M16 6.2A3 3 0 0 1 16 12" />
       <path d="M17.5 14.2c2.3.5 4 2.4 4 4.8" />
+    </>
+  ),
+  add: (
+    <>
+      <path d="M12 5v14" />
+      <path d="M5 12h14" />
+    </>
+  ),
+  search: (
+    <>
+      <circle cx="11" cy="11" r="6" />
+      <path d="m16 16 4 4" />
+    </>
+  ),
+  layers: (
+    <>
+      <path d="m12 3 8 4.5-8 4.5-8-4.5L12 3Z" />
+      <path d="m4 12 8 4.5 8-4.5" />
+      <path d="m4 16.5 8 4.5 8-4.5" />
     </>
   ),
   dots: (

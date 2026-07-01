@@ -1,6 +1,11 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { getCurrentUser, signUp, safeNextPath } from "@/lib/auth";
+import {
+  emailVerificationRequired,
+  getCurrentUser,
+  signUp,
+  safeNextPath,
+} from "@/lib/auth";
 import { requestEmailVerification } from "@/lib/account-email";
 import { listConfiguredProviders } from "@/lib/oauth";
 
@@ -11,6 +16,7 @@ async function signUpAction(formData: FormData) {
   const email = String(formData.get("email") ?? "");
   const name = String(formData.get("display_name") ?? "");
   const password = String(formData.get("password") ?? "");
+  const next = safeNextPath(String(formData.get("next") || "/app/welcome"));
   let userEmail: string | null = null;
   let userId: string | null = null;
   try {
@@ -19,7 +25,9 @@ async function signUpAction(formData: FormData) {
     userEmail = u.email;
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Sign up failed.";
-    redirect(`/sign-up?error=${encodeURIComponent(msg)}`);
+    redirect(
+      `/sign-up?error=${encodeURIComponent(msg)}&next=${encodeURIComponent(next)}`,
+    );
   }
   // Best-effort verification email (sendEmail never throws). Awaited so the
   // console/provider call completes before we navigate; kept OUTSIDE the
@@ -27,8 +35,14 @@ async function signUpAction(formData: FormData) {
   if (userId && userEmail) {
     await requestEmailVerification(userId, userEmail);
   }
-  // First-run wizard.
-  redirect("/app/welcome");
+  if (emailVerificationRequired()) {
+    redirect(
+      `/sign-in?error=${encodeURIComponent(
+        "Check your email to verify your account before signing in.",
+      )}&next=${encodeURIComponent(next)}`,
+    );
+  }
+  redirect(next);
 }
 
 export default async function SignUpPage({
@@ -88,6 +102,7 @@ export default async function SignUpPage({
           ) : null}
 
           <form action={signUpAction} className={providers.length > 0 ? "space-y-4" : "mt-8 space-y-4"}>
+            <input type="hidden" name="next" value={next ?? "/app/welcome"} />
             <Field
               label="Display name"
               name="display_name"
@@ -121,7 +136,10 @@ export default async function SignUpPage({
 
           <p className="mt-6 text-sm text-[color:var(--color-ink-muted)]">
             Already have an account?{" "}
-            <Link href="/sign-in" className="text-[color:var(--color-ink)] underline underline-offset-4">
+            <Link
+              href={`/sign-in${next ? `?next=${encodeURIComponent(next)}` : ""}`}
+              className="text-[color:var(--color-ink)] underline underline-offset-4"
+            >
               Log in
             </Link>
           </p>

@@ -9,13 +9,16 @@ async function signInAction(formData: FormData) {
   "use server";
   const email = String(formData.get("email") ?? "");
   const password = String(formData.get("password") ?? "");
+  const next = safeNextPath(String(formData.get("next") ?? ""));
   try {
     await signIn(email, password);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Login failed.";
-    redirect(`/sign-in?error=${encodeURIComponent(msg)}`);
+    redirect(
+      `/sign-in?error=${encodeURIComponent(msg)}&next=${encodeURIComponent(next)}`,
+    );
   }
-  redirect("/app");
+  redirect(next);
 }
 
 export default async function SignInPage({
@@ -69,6 +72,7 @@ export default async function SignInPage({
           </>
         ) : null}
         <form action={signInAction} className={providers.length > 0 ? "space-y-4" : "mt-8 space-y-4"}>
+          <input type="hidden" name="next" value={safeNextPath(next)} />
           <label className="block">
             <span className="label">Email</span>
             <input
@@ -97,7 +101,7 @@ export default async function SignInPage({
         </form>
         <p className="mt-3 text-xs text-[color:var(--color-ink-soft)]">
           <Link
-            href="/forgot"
+            href={`/forgot${next ? `?next=${encodeURIComponent(next)}` : ""}`}
             className="underline underline-offset-4 hover:text-[color:var(--color-ink)]"
           >
             Forgot your password?
@@ -106,7 +110,7 @@ export default async function SignInPage({
         <p className="mt-6 text-sm text-[color:var(--color-ink-muted)]">
           New to Agent2Agent?{" "}
           <Link
-            href="/sign-up"
+            href={`/sign-up${next ? `?next=${encodeURIComponent(next)}` : ""}`}
             className="text-[color:var(--color-ink)] underline underline-offset-4"
           >
             Create an account

@@ -1,6 +1,5 @@
 import { describe, it, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
 import { generateKeyPairSync } from "node:crypto";
 import { setupTestDb, teardownTestDb, resetTables } from "../helpers/setup";
 import { _resetDbForTests, db } from "../../lib/db";
@@ -27,45 +26,130 @@ import { generateReply, parseBrainConfig, type ConvTurn } from "../../lib/brains
 import type { Agent, BrainConfig } from "../../lib/types";
 
 // ---------------------------------------------------------------------------
-// Local HTTP fixture — plays the remote A2A platform. Each test swaps in a
-// handler; the server reads the full request body first so JSON-RPC handlers
-// can inspect it.
+// In-memory fetch fixture — plays the remote A2A platform without binding a
+// localhost port. Some sandboxes disallow listen(127.0.0.1), and the old
+// server fixture would hang the entire file before any subtest could run.
 // ---------------------------------------------------------------------------
 
-let fixture: Server;
-let baseUrl = "";
-let handler: (req: IncomingMessage, res: ServerResponse, body: string) => void = (
+type FixtureReq = {
+  url: string;
+  method: string;
+  headers: Record<string, string | undefined>;
+};
+
+class FixtureRes {
+  private status = 200;
+  private headers: Record<string, string> = {};
+
+  constructor(private resolve: (res: Response) => void) {}
+
+  writeHead(status: number, headers?: Record<string, string>): this {
+    this.status = status;
+    this.headers = headers ?? {};
+    return this;
+  }
+
+  end(body = ""): void {
+    this.resolve(
+      new Response(body, {
+        status: this.status,
+        headers: this.headers,
+      }),
+    );
+  }
+}
+
+const realFetch = globalThis.fetch;
+const baseUrl = "http://127.0.0.1:43519";
+let handler: (req: FixtureReq, res: FixtureRes, body: string) => void = (
   _req,
   res,
 ) => {
   res.writeHead(404).end();
 };
 
-function json(res: ServerResponse, status: number, value: unknown): void {
+function json(res: FixtureRes, status: number, value: unknown): void {
   const text = JSON.stringify(value);
   res.writeHead(status, { "content-type": "application/json" });
   res.end(text);
 }
 
+function headersObject(headers: HeadersInit | undefined): Record<string, string | undefined> {
+  const out: Record<string, string | undefined> = {};
+  if (!headers) return out;
+  if (headers instanceof Headers) {
+    headers.forEach((v, k) => {
+      out[k.toLowerCase()] = v;
+    });
+    return out;
+  }
+  if (Array.isArray(headers)) {
+    for (const [k, v] of headers) out[k.toLowerCase()] = v;
+    return out;
+  }
+  for (const [k, v] of Object.entries(headers)) {
+    out[k.toLowerCase()] = String(v);
+  }
+  return out;
+}
+
+async function bodyText(body: BodyInit | null | undefined): Promise<string> {
+  if (!body) return "";
+  if (typeof body === "string") return body;
+  if (body instanceof URLSearchParams) return body.toString();
+  if (body instanceof ArrayBuffer) return Buffer.from(body).toString("utf8");
+  if (ArrayBuffer.isView(body)) {
+    return Buffer.from(body.buffer, body.byteOffset, body.byteLength).toString("utf8");
+  }
+  return String(body);
+}
+
+function fixtureFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const raw = input instanceof Request ? input.url : String(input);
+  const url = new URL(raw);
+  if (url.origin !== baseUrl) {
+    return realFetch(input, init);
+  }
+  if (init?.signal?.aborted) {
+    return Promise.reject(new DOMException("The operation was aborted.", "AbortError"));
+  }
+  return new Promise<Response>((resolve, reject) => {
+    const onAbort = () => {
+      reject(new DOMException("The operation was aborted.", "AbortError"));
+    };
+    init?.signal?.addEventListener("abort", onAbort, { once: true });
+    void bodyText(init?.body).then((body) => {
+      if (init?.signal?.aborted) return onAbort();
+      const res = new FixtureRes((response) => {
+        init?.signal?.removeEventListener("abort", onAbort);
+        resolve(response);
+      });
+      try {
+        handler(
+          {
+            url: `${url.pathname}${url.search}`,
+            method: init?.method ?? "GET",
+            headers: headersObject(init?.headers),
+          },
+          res,
+          body,
+        );
+      } catch (err) {
+        init?.signal?.removeEventListener("abort", onAbort);
+        reject(err);
+      }
+    }, reject);
+  });
+}
+
 before(async () => {
   setupTestDb();
   _resetDbForTests();
-  fixture = createServer((req, res) => {
-    let body = "";
-    req.on("data", (c) => (body += c));
-    req.on("end", () => handler(req, res, body));
-  });
-  await new Promise<void>((resolve) => fixture.listen(0, "127.0.0.1", resolve));
-  const addr = fixture.address();
-  if (!addr || typeof addr !== "object") throw new Error("fixture did not bind");
-  baseUrl = `http://127.0.0.1:${addr.port}`;
+  globalThis.fetch = fixtureFetch as typeof fetch;
 });
 
 after(async () => {
-  await new Promise<void>((resolve) => {
-    fixture.closeAllConnections();
-    fixture.close(() => resolve());
-  });
+  globalThis.fetch = realFetch;
   delete process.env.A2A_CARD_SIGNING_KEY;
   _resetSigningKeyForTests();
   _resetDbForTests();

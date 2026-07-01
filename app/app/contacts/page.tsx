@@ -109,7 +109,11 @@ async function startWorkspaceAction(formData: FormData) {
     }
   }
   revalidatePath("/app", "layout");
-  redirect(`/app/c/${convId}/workspace/${ws.id}`);
+  redirect(
+    `/app?rail=files&conversation=${encodeURIComponent(
+      convId,
+    )}&workspace=${encodeURIComponent(ws.id)}`,
+  );
 }
 
 async function createInviteAction(formData: FormData) {
@@ -187,7 +191,8 @@ export default async function ContactsPage({
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? `${proto}://${host}`;
   const friends = Array.from(friendIds)
     .map((id) => getAgent(id))
-    .filter((a): a is NonNullable<ReturnType<typeof getAgent>> => !!a);
+    .filter((a): a is NonNullable<ReturnType<typeof getAgent>> => !!a)
+    .filter((a) => a.owner_user_id !== user.id);
 
   const searchResults = q
     ? searchAgentsByPrefix(q).filter((a) => !myAgentIds.has(a.id))
@@ -196,11 +201,12 @@ export default async function ContactsPage({
     <div className="app-stage">
       <header className="page-header-row">
         <div>
-          <div className="page-kicker">People & Assistants</div>
-          <h1 className="page-title">Contacts</h1>
+          <div className="page-kicker">Invite collaborator</div>
+          <h1 className="page-title">Add a friend&apos;s agent</h1>
           <p className="page-subtitle">
-            Search by assistant ID. Friendships are between assistants, not
-            accounts — so you control who each of your assistants can talk to.
+            Connect another person&apos;s assistant before you invite it into
+            rooms, handoffs and workspaces. Friendship enables contact; grants
+            still control scoped access.
           </p>
         </div>
         <div className="metric-grid min-w-[360px] max-w-[520px] flex-1 text-center">
@@ -228,14 +234,14 @@ export default async function ContactsPage({
           <div className="command-cell">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <div className="page-kicker">Quick invite</div>
+                <div className="page-kicker">Invite collaborator</div>
                 <h2 className="command-title">Create a single-use link</h2>
                 <p className="command-copy">
-                  Share a short invite from one of your assistants. The recipient
-                  accepts once, then their assistants can join your network.
+                  Share a short invite from one of your assistants. The
+                  recipient accepts once, then their assistant can enter your
+                  trusted network.
                 </p>
               </div>
-              <span className="tag tag-violet">1 use</span>
             </div>
 
             {myAgents.length > 0 ? (
@@ -266,7 +272,7 @@ export default async function ContactsPage({
               </form>
             ) : (
               <Link href="/app/agents/new" className="btn btn-primary mt-4">
-                Create an assistant first
+                Add my agent first
               </Link>
             )}
 
@@ -312,8 +318,8 @@ export default async function ContactsPage({
           <div className="command-cell">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <div className="page-kicker">Directory lookup</div>
-                <h2 className="command-title">Find an assistant</h2>
+                <div className="page-kicker">Trusted network</div>
+                <h2 className="command-title">Find a friend&apos;s agent</h2>
                 <p className="command-copy">
                   Search by exact assistant ID or name, then send the request
                   from the assistant you want to introduce.
@@ -327,7 +333,7 @@ export default async function ContactsPage({
                 className="input flex-1"
                 name="q"
                 defaultValue={q ?? ""}
-                placeholder="Try bob.review or an exact assistant ID"
+                placeholder="Paste or search an assistant ID"
               />
               <button type="submit" className="btn btn-primary">
                 Search
@@ -380,7 +386,7 @@ export default async function ContactsPage({
                   <form action={rejectAction}>
                     <input type="hidden" name="request_id" value={r.id} />
                     <button type="submit" className="btn btn-ghost btn-sm">
-                      Reject
+                      Decline
                     </button>
                   </form>
                 </div>
@@ -415,52 +421,49 @@ export default async function ContactsPage({
           <div>
             <div className="page-kicker">Directory</div>
             <h2 className="text-[18px] font-semibold tracking-tight">
-              Friends ({friends.length})
+              Trusted assistants ({friends.length})
             </h2>
           </div>
           <span className="text-[12px] text-[color:var(--color-ink-soft)]">
-            People and assistants your agents can safely work with.
+            Friendship unlocks direct chat. Room access and writes still need grants.
           </span>
         </div>
         {friends.length === 0 ? (
           <p className="text-sm text-[color:var(--color-ink-muted)]">
-            No friends yet. Search above and send a request.
+            No trusted assistants yet. Search above or create a single-use invite.
           </p>
         ) : (
           <ul className="directory-panel">
             {friends.map((f) => (
-              <li key={f.id} className="directory-row">
+              <li key={f.id} className="grid grid-cols-[minmax(220px,1fr)_minmax(160px,.7fr)_auto] items-center gap-4 px-4 py-3 border-b last:border-b-0 border-[color:var(--color-line)] hover:bg-[color:var(--color-hover)]">
                 <div className="flex items-center gap-3 min-w-0">
-                  <span className="person-orb">
-                    {f.avatar_emoji}
-                  </span>
+                  <ContactAvatar name={f.display_name} />
                   <div className="flex-1 min-w-0">
-                    <div className="font-semibold truncate">{f.display_name}</div>
+                    <div className="font-semibold truncate">
+                      {cleanAgentName(f.display_name)}
+                    </div>
                     <code className="text-xs font-mono text-[color:var(--color-ink-muted)] truncate block">
                       {f.id}
                     </code>
                   </div>
                 </div>
-                <div className="min-w-0 text-[12px] leading-relaxed text-[color:var(--color-ink-muted)]">
-                  {f.description ? (
-                    <span className="line-clamp-2">{f.description}</span>
-                  ) : (
-                    <span className="tag">Ready for chat and shared workspaces</span>
-                  )}
+                <div className="min-w-0 flex items-center gap-2">
+                  <span className="tag tag-green">trusted</span>
+                  <span className="tag">room-ready</span>
                 </div>
-                <div className="flex gap-1.5 flex-wrap justify-end">
+                <div className="flex gap-1.5 justify-end">
                   <Link
                     href={`/app/conversations/new?with=${encodeURIComponent(f.id)}`}
                     className="btn btn-secondary btn-sm"
                   >
-                    Start chat
+                    Chat
                   </Link>
                   <Link
                     href={`/app/conversations/new?with=${encodeURIComponent(f.id)}&group=1`}
                     className="btn btn-secondary btn-sm"
                     title="Create a group room — pre-fills this friend"
                   >
-                    + Group
+                    Group
                   </Link>
                   <form action={startWorkspaceAction}>
                     <input type="hidden" name="other_agent_id" value={f.id} />
@@ -469,7 +472,7 @@ export default async function ContactsPage({
                       className="btn btn-secondary btn-sm"
                       title="Direct chat + a shared workspace, in one click"
                     >
-                      + Workspace
+                      Workspace
                     </button>
                   </form>
                 </div>
@@ -506,7 +509,7 @@ function SearchResultRow({
   return (
     <div className="directory-row !grid-cols-[minmax(220px,1fr)_auto] rounded-2xl border border-[color:var(--color-line)] bg-white/55">
       <div className="flex items-center gap-3 min-w-0 flex-1">
-        <span className="person-orb">{agent.avatar_emoji}</span>
+        <ContactAvatar name={agent.display_name} />
         <div className="min-w-0">
           <div className="font-medium truncate">{agent.display_name}</div>
           <code className="text-xs font-mono text-[color:var(--color-ink-muted)] truncate block">
@@ -532,5 +535,19 @@ function SearchResultRow({
         </form>
       )}
     </div>
+  );
+}
+
+function cleanAgentName(name: string): string {
+  return name.replace(/\s*\(me\)\s*/gi, "").trim() || "Partner agent";
+}
+
+function ContactAvatar({ name }: { name: string }) {
+  const words = cleanAgentName(name).split(/\s+/).filter(Boolean);
+  const initials = (words[0]?.[0] ?? "A") + (words[1]?.[0] ?? "");
+  return (
+    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-[color:var(--color-line)] bg-[color:var(--color-paper-faint)] text-[12px] font-semibold text-[color:var(--color-ink)]">
+      {initials.toUpperCase()}
+    </span>
   );
 }

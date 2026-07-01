@@ -188,15 +188,6 @@ export function subscribeAgent(
   });
 }
 
-export function unsubscribeAgent(workspaceId: string, agentId: string): void {
-  db()
-    .prepare(
-      `DELETE FROM workspace_subscriptions
-       WHERE workspace_id = ? AND agent_id = ?`,
-    )
-    .run(workspaceId, agentId);
-}
-
 export function getSubscription(
   workspaceId: string,
   agentId: string,

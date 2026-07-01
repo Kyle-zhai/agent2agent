@@ -1,7 +1,12 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { requireUser, changePassword } from "@/lib/auth";
+import {
+  changePassword,
+  requireUser,
+  setInitialPassword,
+  userHasPassword,
+} from "@/lib/auth";
 import {
   clearUserAvatar,
   getUserExtended,
@@ -71,11 +76,16 @@ async function changePasswordAction(formData: FormData) {
   const oldPassword = String(formData.get("old_password") ?? "");
   const newPassword = String(formData.get("new_password") ?? "");
   const confirm = String(formData.get("confirm_password") ?? "");
+  const hadPassword = userHasPassword(user.id);
   if (newPassword !== confirm) {
     redirect(`/app/me?err=${encodeURIComponent("New password and confirmation don't match.")}`);
   }
   try {
-    await changePassword(user.id, oldPassword, newPassword);
+    if (hadPassword) {
+      await changePassword(user.id, oldPassword, newPassword);
+    } else {
+      await setInitialPassword(user.id, newPassword);
+    }
   } catch (err) {
     redirect(
       `/app/me?err=${encodeURIComponent(
@@ -83,7 +93,11 @@ async function changePasswordAction(formData: FormData) {
       )}`,
     );
   }
-  redirect(`/app/me?ok=Password+changed+%E2%80%94+other+sessions+signed+out`);
+  redirect(
+    hadPassword
+      ? `/app/me?ok=Password+changed+%E2%80%94+other+sessions+signed+out`
+      : `/app/me?ok=Password+set`,
+  );
 }
 
 export default async function ProfilePage({
@@ -93,6 +107,7 @@ export default async function ProfilePage({
 }) {
   const user = await requireUser();
   const ext = getUserExtended(user.id);
+  const hasPassword = userHasPassword(user.id);
   const { ok, err } = await searchParams;
   return (
     <div className="app-stage">
@@ -183,21 +198,27 @@ export default async function ProfilePage({
       </section>
 
       <section className="module-panel p-6">
-        <h2 className="font-medium mb-3">Change password</h2>
+        <h2 className="font-medium mb-3">
+          {hasPassword ? "Change password" : "Set password"}
+        </h2>
         <p className="text-xs text-[color:var(--color-ink-soft)] mb-3">
-          Other sessions are signed out automatically after a successful change.
+          {hasPassword
+            ? "Other sessions are signed out automatically after a successful change."
+            : "Add a password so you can sign in without an OAuth provider."}
         </p>
         <form action={changePasswordAction} className="space-y-3">
-          <label className="block">
-            <span className="label">Current password</span>
-            <input
-              type="password"
-              name="old_password"
-              required
-              className="input"
-              autoComplete="current-password"
-            />
-          </label>
+          {hasPassword ? (
+            <label className="block">
+              <span className="label">Current password</span>
+              <input
+                type="password"
+                name="old_password"
+                required
+                className="input"
+                autoComplete="current-password"
+              />
+            </label>
+          ) : null}
           <label className="block">
             <span className="label">New password</span>
             <input

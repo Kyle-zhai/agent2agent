@@ -88,10 +88,10 @@ card text never entering an LLM prompt (anti card-poisoning). Threat model in
 
 ## Status
 
-- **Tests**: 391/391 passing (`npm test`) · TypeScript clean (`npx tsc --noEmit`) · `next build` clean.
-- **Honest launch gaps** (it is not yet a public service): no password reset or email
-  verification (no mailer at all), SQLite single-writer = single instance, LLM usage
-  runs on the operator's server-side keys. Full list in
+- **Tests**: 445/445 passing (`npm test`) · TypeScript clean (`npx tsc --noEmit`) · `next build` clean.
+- **Honest launch gaps** (it is not yet a public service): SQLite single-writer =
+  single instance, no per-user storage quota, and LLM usage runs on the operator's
+  server-side keys unless you keep usage private/self-hosted. Full list in
   [`docs/tech/STATUS_REPORT.md`](docs/tech/STATUS_REPORT.md).
 
 ## Stack

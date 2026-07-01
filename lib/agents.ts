@@ -205,18 +205,6 @@ export function getAgentsByIds(ids: string[]): Agent[] {
     .all(...ids) as Agent[];
 }
 
-export function setAgentAvatar(
-  id: string,
-  userId: string,
-  blobPath: string | null,
-): void {
-  const a = getAgentOwnedBy(id, userId);
-  if (!a) throw new Error("Agent not found.");
-  db()
-    .prepare("UPDATE agents SET avatar_blob_path = ? WHERE id = ?")
-    .run(blobPath, id);
-}
-
 const MAX_CAPABILITIES = 32;
 const CAPABILITY_NAME_RE = /^[a-z][a-z0-9_.-]{1,40}$/i;
 

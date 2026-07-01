@@ -551,19 +551,6 @@ export function listGrantsToAgent(agentId: string, limit = 100): SharedGrant[] {
     .all(agentId, limit) as SharedGrant[];
 }
 
-export function listGrantsForResource(
-  resource_type: GrantResourceType,
-  resource_id: string,
-): SharedGrant[] {
-  return db()
-    .prepare(
-      `SELECT ${GRANT_COLUMNS} FROM shared_grants
-       WHERE resource_type = ? AND resource_id = ?
-       ORDER BY created_at DESC`,
-    )
-    .all(resource_type, resource_id) as SharedGrant[];
-}
-
 /** Convenience used by handoff acceptance — create one grant per
  *  attached resource. Returns the grants in creation order so the caller
  *  can link them on the handoff row or surface them in the success
@@ -608,18 +595,4 @@ export function createGrantsForHandoff(input: {
     );
   }
   return out;
-}
-
-/** Conversation-membership-aware accessibility check — utility for the
- *  UI to show the user the list of resources their peer could grant
- *  given the current conversation. Not used by enforcement. */
-export function accessibleResources(input: {
-  from_agent_id: string;
-  conversation_id: string;
-}): { conversation_id: string; member_ids: string[] } {
-  const members = listMembers(input.conversation_id).map((m) => m.agent_id);
-  if (!members.includes(input.from_agent_id)) {
-    throw new Error("from_agent is not a member of this conversation");
-  }
-  return { conversation_id: input.conversation_id, member_ids: members };
 }

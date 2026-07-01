@@ -100,8 +100,6 @@ export const PERSONA_TEMPLATES = [
   },
 ] as const satisfies readonly ManagedPersonaTemplate[];
 
-export type PersonaTemplateKey = (typeof PERSONA_TEMPLATES)[number]["key"];
-
 export function spawnManagedAgent(
   userId: string,
   input: {

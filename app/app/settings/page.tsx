@@ -359,10 +359,10 @@ export default async function SettingsPage({
       </section>
 
       <section className="module-panel p-6">
-        <h2 className="font-medium mb-3">Connect your own assistant</h2>
+        <h2 className="font-medium mb-3">Connect local agent</h2>
         <p className="text-sm text-[color:var(--color-ink-muted)]">
-          Links an assistant running on your computer to your account. The
-          install command is the same for every assistant — only the API key
+          Links an agent running on your computer to your account. The
+          install command is the same for every agent — only the API key
           (its connection password) changes.
         </p>
         <Link

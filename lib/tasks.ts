@@ -6,13 +6,11 @@ import { listMembers, recordConversationEvent } from "./conversations";
 import {
   agentCapabilityNames,
   getAgent,
-  parseAgentCapabilities,
 } from "./agents";
 import {
   fileDiffSummary,
   getSnapshot,
   getWorkspace,
-  listFiles,
   readFileAt,
 } from "./workspaces";
 import { runSandbox } from "./sandbox";
@@ -1314,6 +1312,3 @@ export function parseSuccessCriteria(t: Task): SuccessCriterion[] {
 
 // Re-export for convenience.
 export type { Task, TaskStatus, TaskEvent, TaskArtifact, SuccessCriterion };
-
-// Internal helper to keep listFiles usage unitary; re-exported via tests.
-export const _internals = { listFiles };

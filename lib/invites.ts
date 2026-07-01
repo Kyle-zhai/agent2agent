@@ -262,13 +262,3 @@ export function redeemInvite(input: {
     },
   };
 }
-
-export function listRedemptions(inviteId: string): InviteRedemption[] {
-  return db()
-    .prepare(
-      `SELECT invite_id, redeemer_user_id, redeemer_agent_id, redeemed_at
-       FROM invite_redemptions WHERE invite_id = ?
-       ORDER BY redeemed_at ASC`,
-    )
-    .all(inviteId) as InviteRedemption[];
-}

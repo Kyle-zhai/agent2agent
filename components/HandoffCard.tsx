@@ -214,7 +214,9 @@ export function HandoffCard({
           ) : null}
           {handoff.workspace_id ? (
             <Link
-              href={`/app/c/${handoff.conversation_id}/workspace/${handoff.workspace_id}`}
+              href={`/app?rail=files&conversation=${encodeURIComponent(
+                handoff.conversation_id,
+              )}&workspace=${encodeURIComponent(handoff.workspace_id)}`}
               className="tag tag-violet hover:bg-[color:var(--color-tint-violet-ink)]/15"
             >
               📁 Open the shared files

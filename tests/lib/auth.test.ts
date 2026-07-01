@@ -7,6 +7,7 @@ import {
   signUp,
   signIn,
   changePassword,
+  setInitialPassword,
   signOut,
   getCurrentUser,
   requireUser,
@@ -30,6 +31,7 @@ beforeEach(() => {
   NOW = 1_700_000_000_000;
   resetTables(db());
   reqCtx.reset(); // clear shim cookies + headers between tests
+  delete process.env.A2A_REQUIRE_EMAIL_VERIFICATION;
 });
 
 const GOOD_PW = "Passw0rd-X1";
@@ -119,6 +121,22 @@ describe("signIn — lockout + constant-time + enumeration", () => {
     assert.equal(row.failed_login_count, 0);
     assert.equal(row.locked_until, null);
   });
+
+  it("blocks password sign-in until email is verified when required", async () => {
+    process.env.A2A_REQUIRE_EMAIL_VERIFICATION = "1";
+    seedUser("usr_a", "a@test.app");
+
+    await assert.rejects(
+      () => signIn("a@test.app", GOOD_PW),
+      /verify your email/i,
+    );
+
+    db()
+      .prepare("UPDATE users SET email_verified_at = ? WHERE id = ?")
+      .run(NOW, "usr_a");
+    const u = await signIn("a@test.app", GOOD_PW);
+    assert.equal(u.id, "usr_a");
+  });
 });
 
 describe("changePassword", () => {
@@ -158,6 +176,23 @@ describe("changePassword", () => {
     await assert.rejects(() => signIn("a@test.app", GOOD_PW), /incorrect/i);
     reqCtx.reset();
     assert.equal((await signIn("a@test.app", "NewPass-9Z1")).id, "usr_a");
+  });
+
+  it("sets the first password for an OAuth-only account", async () => {
+    db()
+      .prepare(
+        "INSERT INTO users (id, email, display_name, password_hash, password_salt, created_at) VALUES (?, ?, ?, '', '', ?)",
+      )
+      .run("usr_oauth", "oauth@test.app", "OAuth", NOW);
+
+    await setInitialPassword("usr_oauth", "NewPass-9Z1");
+
+    const back = await signIn("oauth@test.app", "NewPass-9Z1");
+    assert.equal(back.id, "usr_oauth");
+    await assert.rejects(
+      () => setInitialPassword("usr_oauth", "AnotherPass-9Z1"),
+      /already has a password/i,
+    );
   });
 });
 

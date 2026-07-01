@@ -684,7 +684,13 @@ export default async function TaskDetailPage({
                     return (
                       <li key={a.ref_id} className="space-y-0.5">
                         <Link
-                          href={`/app/c/${convId}/workspace/${wsId ?? ""}`}
+                          href={
+                            wsId
+                              ? `/app?rail=files&conversation=${encodeURIComponent(
+                                  convId,
+                                )}&workspace=${encodeURIComponent(wsId)}`
+                              : `/app?rail=files&conversation=${encodeURIComponent(convId)}`
+                          }
                           className="font-mono underline"
                         >
                           {a.ref_id.slice(0, 14)}…
@@ -707,7 +713,9 @@ export default async function TaskDetailPage({
 
           {t.workspace_id ? (
             <Link
-              href={`/app/c/${convId}/workspace/${t.workspace_id}`}
+              href={`/app?rail=files&conversation=${encodeURIComponent(
+                convId,
+              )}&workspace=${encodeURIComponent(t.workspace_id)}`}
               className="module-panel surface-hover p-3 block text-[12px]"
             >
               ↗ Workspace linked to this task

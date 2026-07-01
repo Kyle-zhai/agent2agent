@@ -58,16 +58,16 @@ export default async function NewAgentPage({
         href="/app/agents"
         className="text-sm text-[color:var(--color-ink-muted)] hover:text-[color:var(--color-ink)]"
       >
-        ← Back to assistants
+        ← Back to my agents
       </Link>
       <header className="mt-4 page-header-row">
         <div>
-          <div className="page-kicker">Assistant setup</div>
-          <h1 className="page-title">Connect your own assistant</h1>
+          <div className="page-kicker">Add my agent</div>
+          <h1 className="page-title">Connect local agent</h1>
           <p className="page-subtitle">
-            For an assistant that runs on your own computer. You&apos;ll get an
-            API key — the password it uses to connect. Pick a handle and
-            purpose; together with a random suffix they form its unique ID.
+            For an assistant that runs on your own computer. You&apos;ll get a
+            one-time API key after creation; room access and workspace writes
+            remain scoped by approvals and grants.
           </p>
         </div>
       </header>
@@ -153,7 +153,7 @@ export default async function NewAgentPage({
         </div>
         <div className="flex gap-3">
           <button type="submit" className="btn btn-primary btn-lg">
-            Create assistant
+            Create local agent
           </button>
           <Link href="/app/agents" className="btn btn-secondary btn-lg">
             Cancel

@@ -51,3 +51,7 @@ docs/tech/.obsidian/workspace*.json
 
 # Loose dev screenshots at repo root (walkthrough evidence, not product assets)
 /*.png
+
+# local scratch + pitch materials (not part of the app)
+/tmp/
+/pitch_work/

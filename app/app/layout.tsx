@@ -9,6 +9,7 @@ import { NotificationsHook } from "@/components/NotificationsHook";
 import { UnreadSync } from "@/components/UnreadSync";
 import { SidebarRail, type RailItem } from "@/components/SidebarRail";
 import { SidebarPanel } from "@/components/SidebarPanel";
+import { UniversalAgentRail } from "@/components/UniversalAgentRail";
 
 export const dynamic = "force-dynamic";
 
@@ -39,20 +40,19 @@ export default async function AppLayout({
 
   const rail: RailItem[] = [
     {
-      href: "/app",
+      href: "/app/welcome",
       icon: "home",
       label: "Home",
       shortLabel: "Home",
-      matchPrefix: "/app",
-      exact: true,
+      matchPrefix: "/app/welcome",
     },
     {
-      href: "/app/inbox",
-      icon: "inbox",
-      label: "Inbox",
-      shortLabel: "Inbox",
-      badge: inboxCount || undefined,
-      matchPrefix: "/app/inbox",
+      href: "/app",
+      icon: "workspace",
+      label: "Workspace",
+      shortLabel: "Workspace",
+      matchPrefix: "/app",
+      exact: true,
     },
     {
       href: "/app/contacts",
@@ -65,46 +65,24 @@ export default async function AppLayout({
     {
       href: "/app/agents",
       icon: "agents",
-      label: "My assistants",
-      shortLabel: "Assistants",
+      label: "My agents",
+      shortLabel: "Agents",
       matchPrefix: "/app/agents",
     },
     {
-      href: "/app/search",
-      icon: "search",
-      label: "Search",
-      shortLabel: "Search",
-      matchPrefix: "/app/search",
-    },
-    {
-      href: "/app/settings",
-      icon: "settings",
-      label: "Settings",
-      shortLabel: "Settings",
-      matchPrefix: "/app/settings",
+      href: "/app/inbox",
+      icon: "inbox",
+      label: "Inbox",
+      shortLabel: "Inbox",
+      badge: inboxCount || undefined,
+      matchPrefix: "/app/inbox",
     },
   ];
-  // Quiet the "unused variable" lint hint — `agents` was used previously
-  // for an empty-state badge that we removed; keep the import path for
-  // future re-use.
-  void agents;
-
   return (
-    // Anchor to the exact visible client area (`fixed inset-0`) so the shell
-    // never causes page scroll. Inside it we CENTER a contained app frame with
-    // breathing room on all four sides: on large screens the frame caps its
-    // size and floats on the canvas backdrop with margins; on smaller screens
-    // it fills the available space (minus padding). Tall non-chat pages scroll
-    // inside <main>, never the page.
-    // Mobile (<sm) tightens the gutters (px-2 pt-2 pb-3) so the rail + one
-    // full-width column fit a 375px viewport; sm+ keeps the original frame.
-    <div className="fixed inset-0 flex justify-center px-2 sm:px-6 lg:px-8 pt-2 sm:pt-4 pb-3 sm:pb-8 bg-[color:var(--color-canvas)] overflow-hidden">
+    <div className="fixed inset-0 overflow-hidden bg-white">
       <NotificationsHook initialUnread={unreadTotal} />
       <UnreadSync count={unreadTotal} />
-      {/* Wider frame (smaller side gutters), with the vertical padding biased
-          toward the bottom (sm:pt-4 / sm:pb-8) so there's more breathing room
-          below the app than above it. */}
-      <div className="flex gap-2.5 w-full h-full max-w-[1840px]">
+      <div className="flex h-full w-full">
         <SidebarRail
           items={rail}
           avatarSrc={userAvatar ? "/api/v1/avatars/me" : null}
@@ -113,14 +91,40 @@ export default async function AppLayout({
           userEmail={user.email}
           onLogout={logoutAction}
         />
-        <SidebarPanel
-          pinned={pinned}
-          active={active}
-          archived={archived}
-          searchAction="/app/search"
-        />
-        <main className="flex-1 min-w-0 h-full overflow-y-auto">{children}</main>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <WorkspaceTopBar />
+          <div className="flex min-h-0 flex-1">
+            <SidebarPanel
+              pinned={pinned}
+              active={active}
+              archived={archived}
+              searchAction="/app/search"
+            />
+            <main className="min-w-0 flex-1 overflow-y-auto">{children}</main>
+            <UniversalAgentRail
+              agentCount={agents.length}
+              inboxCount={inboxCount}
+              roomCount={active.length + pinned.length + archived.length}
+              requestCount={incoming.length}
+            />
+          </div>
+        </div>
       </div>
     </div>
+  );
+}
+
+function WorkspaceTopBar() {
+  return (
+    <header className="flex h-[72px] shrink-0 items-center border-b border-[color:var(--color-line)] bg-white px-5">
+      <div className="flex items-center gap-2">
+        <h1 className="text-[17px] font-semibold tracking-tight text-[color:var(--color-ink)]">
+          Agent2Agent
+        </h1>
+        <svg className="text-[color:var(--color-tint-amber-ink)]" width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+          <path d="m12 2.8 2.7 5.6 6.2.9-4.5 4.3 1.1 6.1-5.5-2.9-5.5 2.9 1.1-6.1-4.5-4.3 6.2-.9L12 2.8Z" />
+        </svg>
+      </div>
+    </header>
   );
 }

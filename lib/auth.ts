@@ -57,6 +57,38 @@ export type User = {
 
 type UserRow = User & { password_hash: string; password_salt: string };
 
+export function emailVerificationRequired(): boolean {
+  return process.env.A2A_REQUIRE_EMAIL_VERIFICATION === "1";
+}
+
+function userHasVerifiedEmail(userId: string): boolean {
+  const row = db()
+    .prepare("SELECT email_verified_at FROM users WHERE id = ?")
+    .get(userId) as { email_verified_at: number | null } | undefined;
+  return !!row?.email_verified_at;
+}
+
+function assertCanCreateSession(userId: string): void {
+  if (!emailVerificationRequired()) return;
+  if (userHasVerifiedEmail(userId)) return;
+  throw new Error("Please verify your email before signing in.");
+}
+
+export function markUserEmailVerified(userId: string): void {
+  db()
+    .prepare(
+      "UPDATE users SET email_verified_at = COALESCE(email_verified_at, ?) WHERE id = ?",
+    )
+    .run(Date.now(), userId);
+}
+
+export function userHasPassword(userId: string): boolean {
+  const row = db()
+    .prepare("SELECT password_hash FROM users WHERE id = ?")
+    .get(userId) as { password_hash: string } | undefined;
+  return !!row?.password_hash;
+}
+
 export async function signUp(
   email: string,
   password: string,
@@ -107,7 +139,9 @@ export async function signUp(
        VALUES (?, ?, ?, ?, ?, ?)`,
     )
     .run(user.id, user.email, user.display_name, hash, salt, user.created_at);
-  await createSession(user.id);
+  if (!emailVerificationRequired()) {
+    await createSession(user.id);
+  }
   logAudit("auth.signup", { userId: user.id, ip: fp.ip, userAgent: fp.ua });
   return user;
 }
@@ -193,6 +227,7 @@ export async function signIn(email: string, password: string): Promise<User> {
       `UPDATE users SET failed_login_count = 0, locked_until = NULL WHERE id = ?`,
     )
     .run(row.id);
+  assertCanCreateSession(row.id);
   await createSession(row.id);
   logAudit("auth.signin", { userId: row.id, ip: fp.ip, userAgent: fp.ua });
   return {
@@ -249,6 +284,33 @@ export async function changePassword(
   });
 }
 
+export async function setInitialPassword(
+  userId: string,
+  newPassword: string,
+): Promise<void> {
+  const fp = await clientFingerprint();
+  const row = db()
+    .prepare("SELECT password_hash FROM users WHERE id = ?")
+    .get(userId) as { password_hash: string } | undefined;
+  if (!row) throw new Error("User not found.");
+  if (row.password_hash) {
+    throw new Error("This account already has a password. Use change password.");
+  }
+  validatePassword(newPassword);
+  const { hash, salt } = hashPassword(newPassword);
+  db()
+    .prepare(
+      "UPDATE users SET password_hash = ?, password_salt = ? WHERE id = ?",
+    )
+    .run(hash, salt, userId);
+  logAudit("auth.password_change", {
+    userId,
+    ip: fp.ip,
+    userAgent: fp.ua,
+    detail: { mode: "initial" },
+  });
+}
+
 export async function signOut(): Promise<void> {
   const jar = await cookies();
   const sid = jar.get(COOKIE_NAME)?.value;
@@ -301,6 +363,7 @@ export async function requireUser(): Promise<User> {
 }
 
 export async function createSession(userId: string): Promise<void> {
+  assertCanCreateSession(userId);
   const id = newSessionId();
   const now = Date.now();
   db()

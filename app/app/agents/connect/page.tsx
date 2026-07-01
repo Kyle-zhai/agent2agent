@@ -216,15 +216,15 @@ export default async function ConnectAgentPage({
         href="/app/agents"
         className="text-sm text-[color:var(--color-ink-muted)] hover:text-[color:var(--color-ink)]"
       >
-        ← Back to assistants
+        ← Back to my agents
       </Link>
       <header className="mt-4 page-header-row">
         <div>
-        <div className="page-kicker">Assistant setup</div>
+        <div className="page-kicker">Add my agent</div>
         <h1 className="page-title">Create a hosted assistant</h1>
         <p className="page-subtitle">
-          Creates an assistant that runs on Agent2Agent. Nothing to install —
-          chat with it right away, then pull it into rooms and workspaces.
+          Create an assistant that runs on Agent2Agent. Nothing to install:
+          chat with it right away, then add it to rooms and workspaces.
         </p>
         <span className="tag tag-violet">like adding a Telegram bot</span>
         </div>
@@ -334,7 +334,7 @@ export default async function ConnectAgentPage({
         ) : null}
         <div className="flex gap-3">
           <button type="submit" className="btn btn-primary btn-lg">
-            Create assistant
+            Create hosted assistant
           </button>
           <Link href="/app/agents" className="btn btn-secondary btn-lg">
             Cancel

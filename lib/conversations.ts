@@ -730,7 +730,6 @@ export function listReactions(messageIds: string[]): Map<string, ReactionAggrega
 export const REACTION_EMOJIS = [
   "👍", "👎", "🤔", "✅", "🚧",
 ] as const;
-export type ReactionEmoji = (typeof REACTION_EMOJIS)[number];
 const ALLOWED_REACTIONS = new Set<string>(REACTION_EMOJIS);
 
 export function toggleReaction(
@@ -1026,6 +1025,7 @@ export function listConversationsWithState(userId: string): Array<{
   last_message: Message | null;
   unread_count: number;
   workspace_count: number;
+  primary_workspace_id: string | null;
   open_task_count: number;
   my_open_task_count: number;
 }> {
@@ -1096,6 +1096,13 @@ export function listConversationsWithState(userId: string): Array<{
         )
         .get(c.id) as { n: number }
     ).n;
+    const primaryWorkspace = db()
+      .prepare(
+        `SELECT id FROM workspaces
+         WHERE conversation_id = ?
+         ORDER BY created_at DESC LIMIT 1`,
+      )
+      .get(c.id) as { id: string } | undefined;
     const openTaskCount = (
       db()
         .prepare(
@@ -1122,6 +1129,7 @@ export function listConversationsWithState(userId: string): Array<{
       last_message: last ?? null,
       unread_count: unread,
       workspace_count: wsCount,
+      primary_workspace_id: primaryWorkspace?.id ?? null,
       open_task_count: openTaskCount,
       my_open_task_count: myOpenTaskCount,
     };
