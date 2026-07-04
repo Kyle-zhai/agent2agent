@@ -27,6 +27,7 @@ export function UniversalAgentRail(_: {
   const [messageDraft, setMessageDraft] = useState("");
   const [groupMessages, setGroupMessages] = useState<string[]>([]);
   const [privateMessages, setPrivateMessages] = useState<string[]>([]);
+  const [discussionMessages, setDiscussionMessages] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inWorkspaceShell = pathname === "/app" || /^\/app\/c\/[^/]+/.test(pathname);
   const conversationKey =
@@ -42,13 +43,6 @@ export function UniversalAgentRail(_: {
 
   if (!inWorkspaceShell) return null;
 
-  const toolRows = [
-    { tool: "read_workspace", time: "92ms", target: `${workspaceProfile.files.filter((file) => file.kind !== "folder").length} files`, status: "Done" },
-    { tool: "write_notes", time: "118ms", target: workspaceProfile.files.find((file) => file.kind === "md")?.name ?? "notes.md", status: "Done" },
-    { tool: "assign_review", time: "44ms", target: workspaceProfile.agents[1]?.name ?? "Review agent", status: "Done" },
-    { tool: "run_checks", time: "14s", target: "workspace, task", status: "Passed" },
-    { tool: "close_task", time: "31s", target: "done", status: "Live" },
-  ];
   const files = getDemoWorkspaceItems(conversationKey);
   function previewHref(path: string) {
     const next = new URLSearchParams(searchParams.toString());
@@ -58,6 +52,22 @@ export function UniversalAgentRail(_: {
   }
   function selectPreviewFile(path: string) {
     router.replace(previewHref(path), { scroll: false });
+  }
+  // Each mode owns its own thread. Team Agent drives shared work, My Agent is
+  // private (never touches the group record), and Discussion is people-only —
+  // routing the composer per tab is what keeps those boundaries real.
+  function sendMessage() {
+    const text = messageDraft.trim();
+    if (!text) return;
+    if (activeTab === "my") {
+      setPrivateMessages((current) => [...current, text]);
+    } else if (activeTab === "discussion") {
+      setDiscussionMessages((current) => [...current, text]);
+    } else {
+      setGroupMessages((current) => [...current, text]);
+      if (activeTab === "files") setActiveTab("team");
+    }
+    setMessageDraft("");
   }
 
   return (
@@ -149,9 +159,16 @@ export function UniversalAgentRail(_: {
             profile={workspaceProfile}
           />
         ) : activeTab === "my" ? (
-          <MyAgentPanel sentMessages={privateMessages} profile={workspaceProfile} />
+          <MyAgentPanel
+            sentMessages={privateMessages}
+            profile={workspaceProfile}
+            onShareToGroup={(text) => {
+              setGroupMessages((current) => [...current, text]);
+              setActiveTab("team");
+            }}
+          />
         ) : activeTab === "discussion" ? (
-          <DiscussionPanel rows={toolRows} />
+          <DiscussionPanel sentMessages={discussionMessages} profile={workspaceProfile} />
         ) : (
           <GroupChatPanel sentMessages={groupMessages} profile={workspaceProfile} />
         )}
@@ -165,50 +182,43 @@ export function UniversalAgentRail(_: {
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
-                const text = messageDraft.trim();
-                if (!text) return;
-                if (activeTab === "my") {
-                  setPrivateMessages((current) => [...current, text]);
-                } else {
-                  setGroupMessages((current) => [...current, text]);
-                  if (activeTab === "files") setActiveTab("team");
-                }
-                setMessageDraft("");
+                sendMessage();
               }
             }}
             rows={2}
-            placeholder={
-              activeTab === "my"
-                ? "Message your private agent..."
-                : "Message the group or assign work..."
-            }
+            placeholder={composerPlaceholder(activeTab)}
             className="min-h-[54px] w-full resize-none bg-transparent text-[13px] leading-relaxed text-[color:var(--color-ink)] outline-none placeholder:text-[color:var(--color-ink-soft)]"
           />
           <div className="mt-3 flex items-center gap-2">
             <FooterButton label="Attach" icon="paperclip" />
-            <Link href="/app/collab/new" className="btn btn-secondary btn-sm">
-              Handoff
-            </Link>
+            {activeTab === "discussion" ? null : (
+              <Link href="/app/collab/new" className="btn btn-secondary btn-sm">
+                Handoff
+              </Link>
+            )}
             <FooterButton label="Add person" icon="user-plus" />
             <FooterButton label="Voice" icon="mic" />
             <span className="ml-auto text-[11px] text-[color:var(--color-ink-soft)]">
-              Claude 3.5 Sonnet
+              {activeTab === "discussion" ? (
+                <span className="inline-flex items-center gap-1">
+                  <PeopleGlyph /> People only · agent off
+                </span>
+              ) : activeTab === "my" ? (
+                "Private · Claude 3.5 Sonnet"
+              ) : (
+                "Claude 3.5 Sonnet"
+              )}
             </span>
             <button
               type="button"
               disabled={messageDraft.trim().length === 0}
-              onClick={() => {
-                const text = messageDraft.trim();
-                if (!text) return;
-                if (activeTab === "my") {
-                  setPrivateMessages((current) => [...current, text]);
-                } else {
-                  setGroupMessages((current) => [...current, text]);
-                  if (activeTab === "files") setActiveTab("team");
-                }
-                setMessageDraft("");
-              }}
-              className="grid h-9 w-9 place-items-center rounded-xl bg-[color:var(--color-tint-blue-ink)] text-white shadow-[0_10px_26px_-18px_rgba(31,95,200,.65)]"
+              onClick={sendMessage}
+              className={
+                "grid h-9 w-9 place-items-center rounded-xl text-white shadow-[0_10px_26px_-18px_rgba(31,95,200,.65)] " +
+                (activeTab === "discussion"
+                  ? "bg-[color:var(--color-ink)]"
+                  : "bg-[color:var(--color-tint-blue-ink)]")
+              }
               aria-label="Send"
             >
               <SendIcon />
@@ -217,44 +227,6 @@ export function UniversalAgentRail(_: {
         </div>
       </footer>
     </aside>
-  );
-}
-
-function ExecutionPanel({
-  rows,
-}: {
-  rows: Array<{ tool: string; time: string; target: string; status: string }>;
-}) {
-  return (
-    <section>
-      <h3 className="text-[12px] font-semibold text-[color:var(--color-ink)]">
-        Execution details
-      </h3>
-      <div className="mt-2 space-y-1.5">
-        {rows.map((row) => (
-          <div
-            key={row.tool}
-            className="flex items-center gap-2 rounded-xl border border-[color:var(--color-line)] bg-[color:var(--color-paper)] px-2.5 py-2"
-          >
-            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-[color:var(--color-paper-faint)] text-[color:var(--color-ink-soft)]">
-              <ToolIcon />
-            </span>
-            <span className="min-w-0 flex-1 truncate text-[12px] font-semibold">
-              {row.tool}
-            </span>
-            <span className="text-[11px] text-[color:var(--color-ink-soft)]">
-              {row.time}
-            </span>
-            <span className="rounded-md bg-[color:var(--color-paper-faint)] px-2 py-1 text-[11px] text-[color:var(--color-ink-muted)]">
-              {row.target}
-            </span>
-            <span className="tag tag-green !py-0.5 !text-[10px]">
-              {row.status}
-            </span>
-          </div>
-        ))}
-      </div>
-    </section>
   );
 }
 
@@ -469,16 +441,22 @@ function GroupChatPanel({
 function MyAgentPanel({
   sentMessages,
   profile,
+  onShareToGroup,
 }: {
   sentMessages: string[];
   profile: DemoWorkspaceProfile;
+  onShareToGroup: (text: string) => void;
 }) {
   const primaryAgent = profile.agents[0] ?? { name: "My agent", role: "workspace.read" };
+  const lastSent = sentMessages[sentMessages.length - 1];
   return (
     <section className="space-y-3">
-      <h3 className="text-[13px] font-semibold text-[color:var(--color-ink)]">
-        Private Agent Chat
-      </h3>
+      <div className="flex items-center justify-between">
+        <h3 className="text-[13px] font-semibold text-[color:var(--color-ink)]">Private Agent Chat</h3>
+        <span className="inline-flex items-center gap-1 rounded-full bg-[#eef4ff] px-2 py-0.5 text-[10px] font-medium text-[color:var(--color-tint-blue-ink)]">
+          <LockGlyph /> Private · only you
+        </span>
+      </div>
       <div className="rounded-xl border border-[color:var(--color-line)] bg-[color:var(--color-paper)] px-3 py-3">
         <div className="flex items-center gap-2">
           <span className="grid h-9 w-9 place-items-center rounded-xl bg-[color:var(--color-tint-blue)] text-[color:var(--color-tint-blue-ink)]">
@@ -486,62 +464,108 @@ function MyAgentPanel({
           </span>
           <div>
             <div className="text-[13px] font-semibold">{primaryAgent.name}</div>
-            <div className="text-[11px] text-[color:var(--color-ink-soft)]">
-              {primaryAgent.role}
-            </div>
+            <div className="text-[11px] text-[color:var(--color-ink-soft)]">{primaryAgent.role}</div>
           </div>
         </div>
         <p className="mt-3 text-[12px] leading-relaxed text-[color:var(--color-ink-muted)]">
-          Private workspace for you and {primaryAgent.name}. Messages here stay out of
-          the group thread until you choose to share work back.
+          A private thread for you and {primaryAgent.name}. Nothing here is visible to the
+          group or written to the shared record until you share it back.
         </p>
       </div>
-      <div className="rounded-2xl border border-[color:var(--color-line)] bg-white px-3 py-3">
-        <div className="text-[11px] text-[color:var(--color-ink-soft)]">
-          {primaryAgent.name}
-        </div>
-        <p className="mt-1 text-[13px] leading-relaxed text-[color:var(--color-ink)]">
-          I can inspect files in {profile.title}, draft a task, or prepare a
-          private review note before you send anything to the group.
-        </p>
-      </div>
+      <AgentBubble name={primaryAgent.name}>
+        I can inspect files in {profile.title}, draft a task, or prepare a private review
+        note before you send anything to the group.
+      </AgentBubble>
       {sentMessages.map((message, index) => (
-        <div
-          key={`${message}-${index}`}
-          className="ml-10 rounded-2xl bg-[color:var(--color-tint-blue-ink)] px-3 py-2 text-[13px] leading-relaxed text-white"
-        >
-          {message}
+        <div key={`${message}-${index}`}>
+          <div className="ml-10 rounded-2xl rounded-tr-md bg-[color:var(--color-tint-blue-ink)] px-3 py-2 text-[13px] leading-relaxed text-white">
+            {message}
+          </div>
+          {index === sentMessages.length - 1 ? (
+            <AgentBubble name={primaryAgent.name}>
+              Drafted privately. Want me to post this to the group, or keep iterating here?
+            </AgentBubble>
+          ) : null}
         </div>
       ))}
-      <Link href="/app/agents" className="btn btn-secondary btn-sm">
-        Manage agents
-      </Link>
+      {lastSent ? (
+        <div className="ml-10">
+          <button
+            type="button"
+            onClick={() => onShareToGroup(lastSent)}
+            className="btn btn-secondary btn-sm"
+          >
+            <ShareBackGlyph /> Share last draft to group
+          </button>
+        </div>
+      ) : (
+        <Link href="/app/agents" className="btn btn-secondary btn-sm">
+          Manage agents
+        </Link>
+      )}
     </section>
   );
 }
 
+function AgentBubble({ name, children }: { name: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-2xl rounded-tl-md border border-[color:var(--color-line)] bg-white px-3 py-3">
+      <div className="text-[11px] text-[color:var(--color-ink-soft)]">{name}</div>
+      <p className="mt-1 text-[13px] leading-relaxed text-[color:var(--color-ink)]">{children}</p>
+    </div>
+  );
+}
+
 function DiscussionPanel({
-  rows,
+  sentMessages,
+  profile,
 }: {
-  rows: Array<{ tool: string; time: string; target: string; status: string }>;
+  sentMessages: string[];
+  profile: DemoWorkspaceProfile;
 }) {
+  // People-only mode: no agent participates. Seed a short human thread from the
+  // workspace's members so the "just talk" channel reads as a real conversation
+  // distinct from Group Chat (where the agent executes).
+  const humans = profile.members.filter((m) => !/agent|bot/i.test(m.role) && !/agent|bot/i.test(m.name));
+  const seeded = [
+    { who: humans[0], text: "Before we hand this to the agent — are we aligned on the launch copy?" },
+    { who: humans[1] ?? humans[0], text: "Yes. One open question on the consent wording, then it's ready." },
+  ].filter((m) => m.who);
   return (
     <section className="space-y-3">
-      <h3 className="text-[13px] font-semibold text-[color:var(--color-ink)]">
-        Discussion
-      </h3>
-      <ExecutionPanel rows={rows} />
-      <section className="flex items-center gap-3 rounded-xl border border-[#bfd3ff] bg-[#eef4ff] px-3 py-3">
-        <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-[color:var(--color-tint-blue-ink)]">
+      <div className="flex items-center justify-between">
+        <h3 className="text-[13px] font-semibold text-[color:var(--color-ink)]">Discussion</h3>
+        <span className="inline-flex items-center gap-1 rounded-full bg-[color:var(--color-paper-faint)] px-2 py-0.5 text-[10px] font-medium text-[color:var(--color-ink-muted)]">
+          <PeopleGlyph /> People only
+        </span>
+      </div>
+      <div className="flex items-start gap-2 rounded-xl border border-[color:var(--color-line)] bg-[color:var(--color-paper)] px-3 py-2.5">
+        <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full text-[color:var(--color-ink-soft)]">
           <InfoIcon />
         </span>
-        <div className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-[color:var(--color-tint-blue-ink)]">
-          Partner onboarding is ready for member review.
+        <p className="text-[12px] leading-relaxed text-[color:var(--color-ink-muted)]">
+          The agent is off in Discussion. This thread stays between people — nothing here
+          triggers the workspace agent or lands in the shared task record.
+        </p>
+      </div>
+      {seeded.map((m, i) => (
+        <div key={i} className="flex items-start gap-2">
+          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[color:var(--color-paper-faint)] text-[10px] font-semibold text-[color:var(--color-ink)] ring-1 ring-[color:var(--color-line)]">
+            {m.who!.emoji}
+          </span>
+          <div className="min-w-0">
+            <div className="text-[11px] text-[color:var(--color-ink-soft)]">{m.who!.name}</div>
+            <div className="mt-0.5 rounded-2xl rounded-tl-md border border-[color:var(--color-line)] bg-white px-3 py-2 text-[13px] leading-relaxed text-[color:var(--color-ink)]">
+              {m.text}
+            </div>
+          </div>
         </div>
-        <Link href="/app/contacts" className="btn btn-primary btn-sm">
-          Invite
-        </Link>
-      </section>
+      ))}
+      {sentMessages.map((message, index) => (
+        <div key={`${message}-${index}`} className="ml-8 rounded-2xl rounded-tr-md bg-[color:var(--color-ink)] px-3 py-2 text-[13px] leading-relaxed text-white">
+          {message}
+        </div>
+      ))}
     </section>
   );
 }
@@ -817,15 +841,6 @@ function DotsIcon() {
   );
 }
 
-function ToolIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <circle cx="11" cy="11" r="6" />
-      <path d="m16 16 4 4" />
-    </svg>
-  );
-}
-
 function FileCardIcon() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -951,6 +966,42 @@ function SendIcon() {
     <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <path d="m22 2-7 20-4-9-9-4Z" />
       <path d="M22 2 11 13" />
+    </svg>
+  );
+}
+
+function composerPlaceholder(tab: "team" | "my" | "discussion" | "files"): string {
+  if (tab === "my") return "Ask your private agent — just for you…";
+  if (tab === "discussion") return "Message the team — no agent here…";
+  return "Message the group or assign work…";
+}
+
+function PeopleGlyph() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
+  );
+}
+
+function LockGlyph() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="4" y="11" width="16" height="10" rx="2" />
+      <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+    </svg>
+  );
+}
+
+function ShareBackGlyph() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7" />
+      <path d="m16 6-4-4-4 4" />
+      <path d="M12 2v13" />
     </svg>
   );
 }
