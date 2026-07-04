@@ -551,6 +551,32 @@ export function listGrantsToAgent(agentId: string, limit = 100): SharedGrant[] {
     .all(agentId, limit) as SharedGrant[];
 }
 
+/** Grants RECEIVED by a user — the inbound side of the Access layer: what this
+ *  user's agents can reach on other people's resources. Mirror of
+ *  listGrantsFromUser so the UI can show both directions of delegation. */
+export function listGrantsToUser(
+  userId: string,
+  opts: { include_revoked?: boolean; limit?: number } = {},
+): SharedGrant[] {
+  const limit = opts.limit ?? 100;
+  if (opts.include_revoked) {
+    return db()
+      .prepare(
+        `SELECT ${GRANT_COLUMNS} FROM shared_grants
+         WHERE to_user_id = ?
+         ORDER BY created_at DESC LIMIT ?`,
+      )
+      .all(userId, limit) as SharedGrant[];
+  }
+  return db()
+    .prepare(
+      `SELECT ${GRANT_COLUMNS} FROM shared_grants
+       WHERE to_user_id = ? AND revoked_at IS NULL
+       ORDER BY created_at DESC LIMIT ?`,
+    )
+    .all(userId, limit) as SharedGrant[];
+}
+
 /** Convenience used by handoff acceptance — create one grant per
  *  attached resource. Returns the grants in creation order so the caller
  *  can link them on the handoff row or surface them in the success

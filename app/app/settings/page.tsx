@@ -12,6 +12,7 @@ import {
 import {
   DURATION_PRESETS,
   listGrantsFromUser,
+  listGrantsToUser,
   parseGrantScopes,
   revokeGrant,
 } from "@/lib/grants";
@@ -109,6 +110,7 @@ export default async function SettingsPage({
   const providers = listConfiguredProviders();
   const linkedSet = new Set(identities.map((i) => i.provider));
   const grants = listGrantsFromUser(user.id, { limit: 100 });
+  const grantsIn = listGrantsToUser(user.id, { limit: 100 });
   const now = Date.now();
   return (
     <div className="app-stage">
@@ -243,6 +245,87 @@ export default async function SettingsPage({
                         title="Revoke this access — it stops working immediately"
                       >
                         Revoke
+                      </button>
+                    </form>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+
+      <section className="module-panel p-6">
+        <h2 className="font-medium mb-1">Access you&apos;ve received</h2>
+        <p className="text-xs text-[color:var(--color-ink-soft)] mb-3">
+          Scoped, expiring access other people&apos;s assistants handed to yours.
+          This is the only thing your agents can reach outside your own account —
+          you can drop any of it here.
+        </p>
+        {grantsIn.length === 0 ? (
+          <p className="text-sm text-[color:var(--color-ink-muted)] italic">
+            No one has shared access with you yet.
+          </p>
+        ) : (
+          <ul className="space-y-2 text-sm">
+            {grantsIn.map((g) => {
+              const scopes = parseGrantScopes(g);
+              const fromAgent = getAgent(g.from_agent_id);
+              const expired = g.expires_at !== null && g.expires_at <= now;
+              const status =
+                g.revoked_at !== null
+                  ? { label: "revoked", tone: "tag" as const }
+                  : expired
+                    ? { label: "expired", tone: "tag" as const }
+                    : { label: "active", tone: "tag tag-green" as const };
+              const expiryLabel =
+                g.expires_at === null
+                  ? "Never expires"
+                  : expired
+                    ? `Expired ${new Date(g.expires_at).toLocaleDateString()}`
+                    : `Expires ${new Date(g.expires_at).toLocaleString()}`;
+              return (
+                <li key={g.id} className="data-row items-start">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className={status.tone}>{status.label}</span>
+                      <span className="text-[12px] font-mono text-[color:var(--color-ink-muted)] truncate">
+                        ← {fromAgent?.display_name ?? g.from_agent_id}
+                      </span>
+                    </div>
+                    <div className="mt-1 text-[12px] text-[color:var(--color-ink-muted)]">
+                      <span className="font-mono">
+                        {g.resource_type}:{g.resource_id.slice(0, 32)}
+                      </span>
+                      <span className="mx-1">·</span>
+                      <span>
+                        can:{" "}
+                        {scopes
+                          .map(
+                            (s) =>
+                              ({
+                                read: "view",
+                                comment: "comment",
+                                write: "edit",
+                                admin: "manage",
+                              })[s] ?? s,
+                          )
+                          .join(" + ")}
+                      </span>
+                    </div>
+                    <div className="mt-0.5 text-[11px] text-[color:var(--color-ink-soft)]">
+                      {expiryLabel}
+                    </div>
+                  </div>
+                  {g.revoked_at === null && !expired ? (
+                    <form action={revokeGrantAction}>
+                      <input type="hidden" name="grant_id" value={g.id} />
+                      <button
+                        type="submit"
+                        className="btn btn-ghost btn-sm text-[color:var(--color-danger)]"
+                        title="Drop this access — your agents can no longer use it"
+                      >
+                        Drop
                       </button>
                     </form>
                   ) : null}

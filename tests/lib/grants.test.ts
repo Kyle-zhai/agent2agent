@@ -13,6 +13,7 @@ import {
   createGrantsForHandoff,
   isGrantActive,
   listGrantsToAgent,
+  listGrantsToUser,
   parseGrantScopes,
   revokeGrant,
   revokeGrantsForHandoff,
@@ -482,5 +483,28 @@ describe("listGrantsToAgent + revokeGrant", () => {
     const after = listGrantsToAgent(bob.id);
     assert.equal(after.length, 1);
     assert.equal(after[0].id, g2.id);
+  });
+});
+
+describe("listGrantsToUser — inbound Access (received grants)", () => {
+  it("lists grants received by the user's agents, excluding revoked", () => {
+    const { alice, bob, ws } = setupTwoUserScenario();
+    // alice grants bob's agent read; bob (usr_bob) is the recipient user.
+    const g1 = createGrant({
+      from_user_id: "usr_alice",
+      from_agent_id: alice.id,
+      to_agent_id: bob.id,
+      resource_type: "workspace",
+      resource_id: ws.id,
+      scopes: ["read"],
+    });
+    // bob has received one grant; alice (the granter) has received none.
+    assert.equal(listGrantsToUser("usr_bob").length, 1);
+    assert.equal(listGrantsToUser("usr_bob")[0].id, g1.id);
+    assert.equal(listGrantsToUser("usr_alice").length, 0);
+    // Revoking removes it from the active inbound list, but include_revoked keeps it.
+    revokeGrant({ grant_id: g1.id, user_id: "usr_bob" });
+    assert.equal(listGrantsToUser("usr_bob").length, 0);
+    assert.equal(listGrantsToUser("usr_bob", { include_revoked: true }).length, 1);
   });
 });
