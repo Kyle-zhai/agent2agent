@@ -18,6 +18,7 @@ import {
 import {
   assertRemoteUrlAllowed,
   attachRemoteCardToAgent,
+  discoverAgentsViaArd,
   fetchRemoteAgentCard,
   sendMessageToRemoteAgent,
   verifyRemoteAgentCard,
@@ -772,5 +773,70 @@ describe("a2a brain through the reply-job worker (end to end)", () => {
       )
       .get(conv.id) as { n: number };
     assert.equal(events.n, 1);
+  });
+});
+
+describe("discoverAgentsViaArd — ARD catalog discovery", () => {
+  it("returns same-origin A2A agent-card entries and drops the rest", async () => {
+    handler = (req, res) => {
+      if (req.url === "/.well-known/ai-catalog.json") {
+        return json(res, 200, {
+          version: "0.9",
+          entries: [
+            {
+              type: "application/a2a-agent-card+json",
+              identifier: "urn:air:127.0.0.1:agents:helper",
+              name: "Helper",
+              description: "A helpful agent",
+              url: `${baseUrl}/api/v1/agents/helper/.well-known/agent-card.json`,
+            },
+            // dropped: non-A2A media type
+            {
+              type: "application/mcp-server-card+json",
+              identifier: "urn:air:127.0.0.1:mcp:tools",
+              url: `${baseUrl}/mcp`,
+            },
+            // dropped: cross-origin url (catalog must not hand out other origins)
+            {
+              type: "application/a2a-agent-card+json",
+              identifier: "urn:air:evil:agents:x",
+              url: "https://evil.example.com/card.json",
+            },
+            // dropped: malformed url
+            {
+              type: "application/a2a-agent-card+json",
+              identifier: "urn:air:127.0.0.1:agents:bad",
+              url: "not a url",
+            },
+          ],
+        });
+      }
+      res.writeHead(404).end();
+    };
+    const agents = await discoverAgentsViaArd(baseUrl);
+    assert.equal(agents.length, 1);
+    assert.equal(agents[0].name, "Helper");
+    assert.equal(agents[0].identifier, "urn:air:127.0.0.1:agents:helper");
+    assert.equal(
+      agents[0].cardUrl,
+      `${baseUrl}/api/v1/agents/helper/.well-known/agent-card.json`,
+    );
+  });
+
+  it("throws a clear error when the origin has no catalog", async () => {
+    handler = (_req, res) => res.writeHead(404).end();
+    await assert.rejects(discoverAgentsViaArd(baseUrl), /No ARD catalog/);
+  });
+
+  it("throws when the catalog has no entries[] array", async () => {
+    handler = (req, res) => {
+      if (req.url === "/.well-known/ai-catalog.json") return json(res, 200, { version: "0.9" });
+      res.writeHead(404).end();
+    };
+    await assert.rejects(discoverAgentsViaArd(baseUrl), /no entries/i);
+  });
+
+  it("SSRF-guards the origin before fetching", async () => {
+    await assert.rejects(discoverAgentsViaArd("http://example.com"), /https|localhost/);
   });
 });

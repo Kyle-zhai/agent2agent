@@ -13,8 +13,10 @@ import {
 import { defaultBrainConfig } from "@/lib/brains";
 import {
   attachRemoteCardToAgent,
+  discoverAgentsViaArd,
   fetchRemoteAgentCard,
   verifyRemoteAgentCard,
+  type DiscoveredAgent,
   type SanitizedRemoteCard,
 } from "@/lib/a2a-client";
 import type { RemoteCardVerification } from "@/lib/types";
@@ -82,6 +84,26 @@ async function connectAction(formData: FormData) {
 // render the preview + verified/unverified/invalid badge. Step 3:
 // connectRemoteA2AAction re-fetches + re-verifies (no TOCTOU on a stale
 // preview) and creates the managed proxy agent with brain provider "a2a".
+
+// ARD discovery: given just an ORIGIN, read its /.well-known/ai-catalog.json
+// and list the A2A agents it publishes so the user can pick one to preview —
+// no need to know each per-agent card URL. Bounces back with ?discover_origin=
+// (or ?discover_error=), same round-trip pattern as the preview flow.
+async function discoverArdAction(formData: FormData) {
+  "use server";
+  await requireUser();
+  const origin = String(formData.get("discover_origin") ?? "").trim();
+  let errMsg: string | null = null;
+  try {
+    await discoverAgentsViaArd(origin); // validate origin + catalog now
+  } catch (err) {
+    errMsg = err instanceof Error ? err.message : "Could not read the discovery catalog.";
+  }
+  if (errMsg) {
+    redirect(`/app/agents/connect?discover_error=${encodeURIComponent(errMsg)}#remote`);
+  }
+  redirect(`/app/agents/connect?discover_origin=${encodeURIComponent(origin)}#remote`);
+}
 
 async function previewRemoteA2AAction(formData: FormData) {
   "use server";
@@ -184,10 +206,13 @@ export default async function ConnectAgentPage({
     template?: string;
     a2a_url?: string;
     a2a_error?: string;
+    discover_origin?: string;
+    discover_error?: string;
   }>;
 }) {
   const user = await requireUser();
-  const { error, template, a2a_url, a2a_error } = await searchParams;
+  const { error, template, a2a_url, a2a_error, discover_origin, discover_error } =
+    await searchParams;
   const myAgents = listAgentsForUser(user.id);
   const cfg = defaultBrainConfig();
   const tpl =
@@ -207,6 +232,17 @@ export default async function ConnectAgentPage({
       remotePreview = { card: fetched.card, verification: v.status, detail: v.detail };
     } catch (err) {
       remoteError = err instanceof Error ? err.message : "Could not fetch the agent card.";
+    }
+  }
+
+  // ARD discovery results (step 2): re-read the catalog for display.
+  let discovered: DiscoveredAgent[] = [];
+  let discoverErr = discover_error ?? null;
+  if (discover_origin && !discoverErr) {
+    try {
+      discovered = await discoverAgentsViaArd(discover_origin);
+    } catch (err) {
+      discoverErr = err instanceof Error ? err.message : "Could not read the catalog.";
     }
   }
 
@@ -364,9 +400,78 @@ export default async function ConnectAgentPage({
           </div>
         ) : null}
 
+        {/* Discovery-first: point at an ORIGIN, list its published agents. */}
+        <form action={discoverArdAction} className="mt-4 module-panel p-5">
+          <label>
+            <span className="label">Discover from an origin (ARD)</span>
+            <input
+              className="input font-mono text-[12.5px]"
+              name="discover_origin"
+              type="url"
+              required
+              placeholder="https://agents.example.com"
+              defaultValue={discover_origin ?? ""}
+            />
+          </label>
+          <p className="mt-1.5 text-[11px] text-[color:var(--color-ink-soft)]">
+            Reads the origin’s <span className="font-mono">/.well-known/ai-catalog.json</span> and
+            lists the A2A agents it publishes.
+          </p>
+          <div className="mt-3">
+            <button type="submit" className="btn btn-secondary">
+              Discover agents
+            </button>
+          </div>
+        </form>
+
+        {discoverErr ? (
+          <div className="callout callout-amber mt-3 text-sm">
+            <span>⚠️</span>
+            <span>{discoverErr}</span>
+          </div>
+        ) : null}
+
+        {discover_origin && !discoverErr ? (
+          <div className="mt-3 module-panel p-5">
+            <div className="text-[12px] text-[color:var(--color-ink-soft)]">
+              {discovered.length} agent{discovered.length === 1 ? "" : "s"} published at{" "}
+              <span className="font-mono">{discover_origin}</span>
+            </div>
+            <div className="mt-3 space-y-2">
+              {discovered.map((d) => (
+                <div
+                  key={d.identifier || d.cardUrl}
+                  className="flex items-center gap-3 rounded-xl border border-[color:var(--color-line)] bg-[color:var(--color-paper)] px-3 py-2.5"
+                >
+                  <div className="text-lg">🌐</div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium">{d.name}</div>
+                    {d.description ? (
+                      <div className="truncate text-[11px] text-[color:var(--color-ink-muted)]">
+                        {d.description}
+                      </div>
+                    ) : null}
+                  </div>
+                  <Link
+                    href={`/app/agents/connect?a2a_url=${encodeURIComponent(d.cardUrl)}#remote`}
+                    className="btn btn-secondary btn-sm shrink-0"
+                  >
+                    Preview
+                  </Link>
+                </div>
+              ))}
+              {discovered.length === 0 ? (
+                <p className="text-[12px] text-[color:var(--color-ink-muted)]">
+                  No A2A agents in this origin’s catalog.
+                </p>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
         <form action={previewRemoteA2AAction} className="mt-4 module-panel p-5">
           <label>
-            <span className="label">Agent card URL</span>
+            <span className="label">…or paste an agent card URL directly</span>
             <input
               className="input font-mono text-[12.5px]"
               name="a2a_url"

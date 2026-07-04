@@ -280,6 +280,80 @@ export async function fetchRemoteAgentCard(
   return { card, rawCard, raw_json: res.text, origin: u.origin };
 }
 
+// --- B1b: ARD discovery — list an origin's agents from its ai-catalog.json ----
+
+const MAX_CATALOG_ENTRIES = 100;
+
+export type DiscoveredAgent = {
+  identifier: string;
+  name: string;
+  description: string;
+  /** AgentCard URL to feed into fetchRemoteAgentCard — re-SSRF-checked there. */
+  cardUrl: string;
+};
+
+/** Discover connectable A2A agents by reading an origin's Agentic Resource
+ *  Discovery catalog (/.well-known/ai-catalog.json). Returns the A2A AgentCard
+ *  entries so the UI can list them for one-click connect ("bring your agent"),
+ *  instead of the user needing each per-agent card URL.
+ *
+ *  Security: the origin is SSRF-checked before fetch; the response is capped
+ *  (5s / ≤256KB); every entry field is control-char-stripped + length-clamped;
+ *  and — because a hostile catalog could point `url` at an internal address —
+ *  each cardUrl is restricted to the SAME ORIGIN as the catalog (cross-origin
+ *  references are dropped). The chosen cardUrl is STILL re-SSRF-checked when
+ *  fetchRemoteAgentCard actually loads it. */
+export async function discoverAgentsViaArd(
+  rawUrl: string,
+  opts?: { timeoutMs?: number },
+): Promise<DiscoveredAgent[]> {
+  const u = await assertRemoteUrlAllowed(rawUrl.trim());
+  const catalogUrl = new URL("/.well-known/ai-catalog.json", u.origin).toString();
+  const res = await fetchCapped(catalogUrl, {
+    headers: { accept: "application/ai-catalog+json, application/json" },
+    timeoutMs: Math.min(opts?.timeoutMs ?? FETCH_TIMEOUT_MS, FETCH_TIMEOUT_MS),
+  });
+  if (res.status !== 200) {
+    throw new Error(`No ARD catalog at ${u.origin} (HTTP ${res.status}).`);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(res.text);
+  } catch {
+    throw new Error("Catalog response is not valid JSON.");
+  }
+  const entriesRaw =
+    parsed && typeof parsed === "object" && Array.isArray((parsed as Record<string, unknown>).entries)
+      ? ((parsed as Record<string, unknown>).entries as unknown[])
+      : null;
+  if (!entriesRaw) throw new Error("Catalog has no entries[] array.");
+
+  const out: DiscoveredAgent[] = [];
+  for (const raw of entriesRaw.slice(0, MAX_CATALOG_ENTRIES)) {
+    if (!raw || typeof raw !== "object") continue;
+    const e = raw as Record<string, unknown>;
+    if (e.type !== "application/a2a-agent-card+json") continue;
+    const url = typeof e.url === "string" ? e.url.trim() : "";
+    if (!url) continue;
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(url);
+    } catch {
+      continue;
+    }
+    // Same-origin only — a catalog must not hand out cross-origin (or internal)
+    // card URLs. Legitimate ARD entries reference the publisher's own domain.
+    if (parsedUrl.origin !== u.origin) continue;
+    out.push({
+      identifier: cleanField(e.identifier, 200),
+      name: cleanField(e.name, 120) || parsedUrl.pathname,
+      description: cleanField(e.description, 280),
+      cardUrl: parsedUrl.toString(),
+    });
+  }
+  return out;
+}
+
 // --- B2: JWS verification against the origin's JWKS ---------------------------
 
 function isCardSignature(v: unknown): v is AgentCardSignature {
