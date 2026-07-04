@@ -96,6 +96,8 @@ export type AuditAction =
   | "grant.use"
   | "grant.use_denied"
   | "grant.revoke_cascade"
+  | "token.exchange"
+  | "token.exchange_denied"
   | "a2a.push_set"
   | "a2a.push_fired"
   | "device_auth.requested"

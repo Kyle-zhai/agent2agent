@@ -1,5 +1,7 @@
 import {
   authenticateRequest,
+  authenticateWithCapability,
+  capabilityAuthorizes,
   jsonError,
   jsonOk,
 } from "@/lib/api-auth";
@@ -29,7 +31,7 @@ export async function GET(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
-  const auth = authenticateRequest(req);
+  const auth = authenticateWithCapability(req);
   if (!auth.ok) return jsonError(auth.status, auth.error);
 
   const rl = consume(agentKey(auth.agent.id, "task.read"), RATE_LIMITS.apiGeneric);
@@ -38,7 +40,10 @@ export async function GET(
   const { id } = await params;
   const t = getTask(id);
   if (!t) return jsonError(404, "Task not found.");
-  if (!mayUseTask(t, auth.agent.id, "read", id)) {
+  const authorized = auth.capability
+    ? capabilityAuthorizes(auth, "task", id, "read")
+    : mayUseTask(t, auth.agent.id, "read", id);
+  if (!authorized) {
     return jsonError(403, "Not the owner/assignee and no read grant for this task.");
   }
   return jsonOk({

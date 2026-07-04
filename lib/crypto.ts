@@ -94,3 +94,25 @@ export function verifyGrantSignature(canonicalJson: string, signature: string): 
   if (!/^[0-9a-f]+$/i.test(signature)) return false;
   return timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(signature, "hex"));
 }
+
+// ---------------------------------------------------------------------------
+// HS256 JWT primitives — used by the capability token-exchange (RFC 8693)
+// when no ES256 card-signing key is configured. The token is signed with the
+// same per-server grant secret, so it is verifiable BY THIS HUB (and any
+// replica sharing the secret) but not by outside parties. When A2A_CARD_
+// SIGNING_KEY is set, token-exchange prefers ES256 so external verifiers can
+// check tokens against our public JWKS. See lib/token-exchange.ts.
+// ---------------------------------------------------------------------------
+
+/** base64url HMAC-SHA256 of the JWS signing input, keyed on the grant secret. */
+export function signJwtHs256(signingInput: string): string {
+  return createHmac("sha256", grantSecret()).update(signingInput).digest("base64url");
+}
+
+/** Constant-time verify of an HS256 JWS signature (base64url) over `signingInput`. */
+export function verifyJwtHs256(signingInput: string, signature: string): boolean {
+  const expected = Buffer.from(signJwtHs256(signingInput), "utf8");
+  const given = Buffer.from(signature, "utf8");
+  if (expected.length !== given.length) return false;
+  return timingSafeEqual(expected, given);
+}

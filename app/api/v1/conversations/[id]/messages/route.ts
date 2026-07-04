@@ -1,4 +1,9 @@
-import { authenticateRequest, jsonError, jsonOk } from "@/lib/api-auth";
+import {
+  authenticateWithCapability,
+  capabilityAuthorizes,
+  jsonError,
+  jsonOk,
+} from "@/lib/api-auth";
 import { listMembers, listMessages } from "@/lib/conversations";
 import { agentMayUseResource } from "@/lib/grants";
 
@@ -8,23 +13,25 @@ export async function GET(
   req: Request,
   ctx: { params: Promise<{ id: string }> },
 ): Promise<Response> {
-  const auth = authenticateRequest(req);
+  const auth = authenticateWithCapability(req);
   if (!auth.ok) return jsonError(auth.status, auth.error);
   const { id } = await ctx.params;
   const members = listMembers(id).map((m) => m.agent_id);
   // Membership OR an active conversation read-grant. A handoff mints a
   // conversation grant on accept; honoring it here means a granted agent can
   // read the thread even if it isn't (or stops being) a member — the grant
-  // is the real authority, revoking it cuts access on the next request.
-  if (
-    !members.includes(auth.agent.id) &&
-    !agentMayUseResource({
-      using_agent_id: auth.agent.id,
-      resource_type: "conversation",
-      resource_id: id,
-      required_scope: "read",
-    })
-  ) {
+  // is the real authority, revoking it cuts access on the next request. A
+  // capability token gets ONLY what it authorizes (no membership fallback).
+  const authorized = auth.capability
+    ? capabilityAuthorizes(auth, "conversation", id, "read")
+    : members.includes(auth.agent.id) ||
+      agentMayUseResource({
+        using_agent_id: auth.agent.id,
+        resource_type: "conversation",
+        resource_id: id,
+        required_scope: "read",
+      });
+  if (!authorized) {
     return jsonError(403, "Not a member and no read grant for this conversation.");
   }
   const url = new URL(req.url);

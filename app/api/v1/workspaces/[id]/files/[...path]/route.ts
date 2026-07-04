@@ -1,5 +1,6 @@
 import {
-  authenticateRequest,
+  authenticateWithCapability,
+  capabilityAuthorizes,
   jsonError,
   jsonOk,
 } from "@/lib/api-auth";
@@ -34,7 +35,7 @@ export async function GET(
   // a Bearer key; a signed-in HUMAN may read/download too when they own a
   // member agent of the workspace's conversation (this is what the web file
   // viewer's Download button uses — browsers can't send agent keys).
-  const auth = authenticateRequest(req);
+  const auth = authenticateWithCapability(req);
   if (auth.ok) {
     const rl = consume(
       agentKey(auth.agent.id, "ws.file.read"),
@@ -42,15 +43,16 @@ export async function GET(
     );
     if (!rl.allowed) return rateLimitResponse(rl);
     if (!ws) return jsonError(404, "Workspace not found.");
-    if (
-      !canRead(ws.id, auth.agent.id) &&
-      !agentMayUseResource({
-        using_agent_id: auth.agent.id,
-        resource_type: "workspace",
-        resource_id: ws.id,
-        required_scope: "read",
-      })
-    ) {
+    const authorized = auth.capability
+      ? capabilityAuthorizes(auth, "workspace", ws.id, "read")
+      : canRead(ws.id, auth.agent.id) ||
+        agentMayUseResource({
+          using_agent_id: auth.agent.id,
+          resource_type: "workspace",
+          resource_id: ws.id,
+          required_scope: "read",
+        });
+    if (!authorized) {
       return jsonError(403, "Not subscribed and no read grant for this workspace.");
     }
   } else {

@@ -1,5 +1,6 @@
 import {
-  authenticateRequest,
+  authenticateWithCapability,
+  capabilityAuthorizes,
   jsonError,
   jsonOk,
 } from "@/lib/api-auth";
@@ -26,7 +27,7 @@ export async function GET(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
-  const auth = authenticateRequest(req);
+  const auth = authenticateWithCapability(req);
   if (!auth.ok) return jsonError(auth.status, auth.error);
 
   const rl = consume(
@@ -38,15 +39,19 @@ export async function GET(
   const { id } = await params;
   const ws = getWorkspace(id);
   if (!ws) return jsonError(404, "Workspace not found.");
-  if (
-    !canRead(ws.id, auth.agent.id) &&
-    !agentMayUseResource({
-      using_agent_id: auth.agent.id,
-      resource_type: "workspace",
-      resource_id: ws.id,
-      required_scope: "read",
-    })
-  ) {
+  // Capability-token callers get EXACTLY what the token authorizes (least
+  // privilege) — no fallback to the subject agent's own subscriptions. Api-key
+  // callers use the normal subscription-or-grant path.
+  const authorized = auth.capability
+    ? capabilityAuthorizes(auth, "workspace", ws.id, "read")
+    : canRead(ws.id, auth.agent.id) ||
+      agentMayUseResource({
+        using_agent_id: auth.agent.id,
+        resource_type: "workspace",
+        resource_id: ws.id,
+        required_scope: "read",
+      });
+  if (!authorized) {
     return jsonError(403, "Not subscribed and no read grant for this workspace.");
   }
 

@@ -44,6 +44,11 @@ export const RATE_LIMITS = {
   // x-forwarded-for past a naive proxy) gets capped here regardless. 60/min
   // across ALL users is far above legit device-approval volume.
   deviceLookupGlobal: { capacity: 60, refillPerSecond: 60 / 60 },
+  // Capability token-exchange (RFC 8693): minting is authenticated (needs a
+  // grant the caller holds) and cheap, but tokens are short-lived so a busy
+  // external agent re-mints often. 30/min per agent covers that while capping
+  // a compromised key from farming tokens.
+  apiTokenExchange: { capacity: 30, refillPerSecond: 30 / 60 },
 } as const satisfies Record<string, RateLimitConfig>;
 
 export type RateLimitResult = {

@@ -93,6 +93,53 @@ export function _resetSigningKeyForTests(): void {
   cachedKey = undefined;
 }
 
+/** True when an ES256 signing key is configured — capability tokens can then
+ *  be signed asymmetrically (ES256) and verified by outside parties against
+ *  our public JWKS, rather than falling back to hub-only HS256. */
+export function es256Available(): boolean {
+  return signingKey() !== null;
+}
+
+/** The `kid` (public-key fingerprint) of the configured ES256 key, or null.
+ *  Lets callers stamp a compact-JWS header without a throwaway signature. */
+export function es256Kid(): string | null {
+  return signingKey()?.kid ?? null;
+}
+
+/** Sign raw bytes with the ES256 card key (raw r||s per RFC 7515). Returns the
+ *  signature + the key's `kid` (so a compact JWS can advertise it), or null
+ *  when no key is configured. Reused by the capability token-exchange to issue
+ *  externally-verifiable JWTs from the same key that signs Agent Cards. */
+export function signDataES256(
+  data: Buffer,
+): { signature: Buffer; kid: string } | null {
+  const k = signingKey();
+  if (!k) return null;
+  const signature = cryptoSign("sha256", data, {
+    key: k.key,
+    dsaEncoding: "ieee-p1363",
+  });
+  return { signature, kid: k.kid };
+}
+
+/** Verify raw bytes against OUR OWN ES256 public key (the counterpart of
+ *  signDataES256). Used to validate capability tokens this hub issued. Returns
+ *  false — never throws — when no key is configured or verification fails. */
+export function verifyDataES256(data: Buffer, signature: Buffer): boolean {
+  const k = signingKey();
+  if (!k) return false;
+  try {
+    return cryptoVerify(
+      "sha256",
+      data,
+      { key: createPublicKey(k.key), dsaEncoding: "ieee-p1363" },
+      signature,
+    );
+  } catch {
+    return false;
+  }
+}
+
 /** Sign a card object (WITHOUT its signatures field) and return the
  *  signatures array to attach, or null when signing is off. */
 export function signAgentCard(
